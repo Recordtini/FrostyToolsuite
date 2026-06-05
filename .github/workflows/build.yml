@@ -19,18 +19,20 @@ jobs:
 
       - name: Set up MSBuild
         uses: microsoft/setup-msbuild@v2
+        with:
+          msbuild-architecture: x64
 
       - name: Set up NuGet
         uses: NuGet/setup-nuget@v2
 
       - name: Restore FrostyEditor
-        run: msbuild FrostyEditor\FrostyEditor.csproj /t:Restore /p:Configuration="Developer - Debug" /p:Platform=x64
+        run: dotnet msbuild FrostyEditor\FrostyEditor.csproj /t:Restore /p:Configuration="Developer - Debug" /p:Platform=x64
 
       - name: Build FrostyEditor
         run: msbuild FrostyEditor\FrostyEditor.csproj /m /p:Configuration="Developer - Debug" /p:Platform=x64
 
       - name: Restore FrostyCmd
-        run: msbuild FrostyCmd\FrostyCmd.csproj /t:Restore /p:Configuration="Developer - Debug" /p:Platform=x64
+        run: dotnet msbuild FrostyCmd\FrostyCmd.csproj /t:Restore /p:Configuration="Developer - Debug" /p:Platform=x64
 
       - name: Build FrostyCmd
         run: msbuild FrostyCmd\FrostyCmd.csproj /m /p:Configuration="Developer - Debug" /p:Platform=x64
@@ -39,7 +41,7 @@ jobs:
         run: New-Item -ItemType Directory -Force FrostyEditor\bin\Developer\Debug\Plugins
 
       - name: Restore CFB profile plugin
-        run: msbuild Plugins\CFBProfilePlugin\CFBProfilePlugin.csproj /t:Restore /p:Configuration="Developer - Debug" /p:Platform=x64 /p:SolutionDir="$env:GITHUB_WORKSPACE\FrostyEditor\"
+        run: dotnet msbuild Plugins\CFBProfilePlugin\CFBProfilePlugin.csproj /t:Restore /p:Configuration="Developer - Debug" /p:Platform=x64 /p:SolutionDir="$env:GITHUB_WORKSPACE\FrostyEditor\"
 
       - name: Build CFB profile plugin
         run: msbuild Plugins\CFBProfilePlugin\CFBProfilePlugin.csproj /m /p:Configuration="Developer - Debug" /p:Platform=x64 /p:SolutionDir="$env:GITHUB_WORKSPACE\FrostyEditor\"
