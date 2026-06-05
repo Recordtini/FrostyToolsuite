@@ -55,6 +55,8 @@ namespace FrostySdk
 
         private static List<Profile> profiles = new List<Profile>();
 
+        public static IEnumerable<string> ProfileNames => profiles.Select(profile => profile.Name);
+
         public static void Initialize(IEnumerable<Profile> pluginProfiles)
         {
             List<string> keys = new List<string>();
