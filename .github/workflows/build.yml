@@ -29,13 +29,13 @@ jobs:
         run: dotnet msbuild FrostyEditor\FrostyEditor.csproj /t:Restore /p:Configuration="Developer - Debug" /p:Platform=x64 /p:RuntimeIdentifier=win-x64
 
       - name: Build FrostyEditor
-        run: msbuild FrostyEditor\FrostyEditor.csproj /m /p:Configuration="Developer - Debug" /p:Platform=x64 /p:RuntimeIdentifier=win-x64
+        run: msbuild FrostyEditor\FrostyEditor.csproj /p:Configuration="Developer - Debug" /p:Platform=x64 /p:RuntimeIdentifier=win-x64
 
       - name: Restore FrostyCmd
         run: dotnet msbuild FrostyCmd\FrostyCmd.csproj /t:Restore /p:Configuration="Developer - Debug" /p:Platform=x64 /p:RuntimeIdentifier=win-x64
 
       - name: Build FrostyCmd
-        run: msbuild FrostyCmd\FrostyCmd.csproj /m /p:Configuration="Developer - Debug" /p:Platform=x64 /p:RuntimeIdentifier=win-x64
+        run: msbuild FrostyCmd\FrostyCmd.csproj /p:Configuration="Developer - Debug" /p:Platform=x64 /p:RuntimeIdentifier=win-x64
 
       - name: Prepare plugin output folder
         run: New-Item -ItemType Directory -Force FrostyEditor\bin\Developer\Debug\Plugins
@@ -44,7 +44,7 @@ jobs:
         run: dotnet msbuild Plugins\CFBProfilePlugin\CFBProfilePlugin.csproj /t:Restore /p:Configuration="Developer - Debug" /p:Platform=x64 /p:RuntimeIdentifier=win-x64 /p:SolutionDir="$env:GITHUB_WORKSPACE\FrostyEditor\"
 
       - name: Build CFB profile plugin
-        run: msbuild Plugins\CFBProfilePlugin\CFBProfilePlugin.csproj /m /p:Configuration="Developer - Debug" /p:Platform=x64 /p:RuntimeIdentifier=win-x64 /p:SolutionDir="$env:GITHUB_WORKSPACE\FrostyEditor\"
+        run: msbuild Plugins\CFBProfilePlugin\CFBProfilePlugin.csproj /p:Configuration="Developer - Debug" /p:Platform=x64 /p:RuntimeIdentifier=win-x64 /p:SolutionDir="$env:GITHUB_WORKSPACE\FrostyEditor\"
 
       - name: Upload editor artifact
         uses: actions/upload-artifact@v4
