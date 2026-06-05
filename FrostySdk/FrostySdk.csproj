@@ -216,6 +216,7 @@
     <ProjectReference Include="..\FrostyHash\FrostyHash.vcxproj">
       <Project>{d1a29bf8-2e2e-47be-845f-a6dd66d175ba}</Project>
       <Name>FrostyHash</Name>
+      <SkipGetTargetFrameworkProperties>true</SkipGetTargetFrameworkProperties>
     </ProjectReference>
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
