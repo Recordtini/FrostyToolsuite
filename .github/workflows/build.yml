@@ -57,5 +57,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: FrostyCmd-Developer-Debug-x64
-          path: FrostyCmd\bin\Developer\Debug\
+          path: FrostyEditor\bin\Developer\Debug\
           if-no-files-found: error
