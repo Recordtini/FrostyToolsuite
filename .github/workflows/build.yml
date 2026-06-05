@@ -1,0 +1,59 @@
+name: Build
+
+on:
+  push:
+    branches:
+      - "**"
+  pull_request:
+    branches:
+      - "**"
+
+jobs:
+  windows:
+    name: Windows x64
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Set up NuGet
+        uses: NuGet/setup-nuget@v2
+
+      - name: Restore FrostyEditor
+        run: msbuild FrostyEditor\FrostyEditor.csproj /t:Restore /p:Configuration="Developer - Debug" /p:Platform=x64
+
+      - name: Build FrostyEditor
+        run: msbuild FrostyEditor\FrostyEditor.csproj /m /p:Configuration="Developer - Debug" /p:Platform=x64
+
+      - name: Restore FrostyCmd
+        run: msbuild FrostyCmd\FrostyCmd.csproj /t:Restore /p:Configuration="Developer - Debug" /p:Platform=x64
+
+      - name: Build FrostyCmd
+        run: msbuild FrostyCmd\FrostyCmd.csproj /m /p:Configuration="Developer - Debug" /p:Platform=x64
+
+      - name: Prepare plugin output folder
+        run: New-Item -ItemType Directory -Force FrostyEditor\bin\Developer\Debug\Plugins
+
+      - name: Restore CFB profile plugin
+        run: msbuild Plugins\CFBProfilePlugin\CFBProfilePlugin.csproj /t:Restore /p:Configuration="Developer - Debug" /p:Platform=x64 /p:SolutionDir="$env:GITHUB_WORKSPACE\FrostyEditor\"
+
+      - name: Build CFB profile plugin
+        run: msbuild Plugins\CFBProfilePlugin\CFBProfilePlugin.csproj /m /p:Configuration="Developer - Debug" /p:Platform=x64 /p:SolutionDir="$env:GITHUB_WORKSPACE\FrostyEditor\"
+
+      - name: Upload editor artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: FrostyEditor-Developer-Debug-x64
+          path: FrostyEditor\bin\Developer\Debug\
+          if-no-files-found: error
+
+      - name: Upload command exporter artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: FrostyCmd-Developer-Debug-x64
+          path: FrostyCmd\bin\Developer\Debug\
+          if-no-files-found: error

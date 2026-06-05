@@ -8,6 +8,7 @@ using FrostySdk.Interfaces;
 using FrostySdk.IO;
 using FrostySdk.Managers;
 using System.Reflection;
+using System.Text;
 
 namespace FrostyCmd
 {
@@ -166,14 +167,31 @@ namespace FrostyCmd
 
         static void Main(string[] args)
         {
-            //if (args.Length < 2)
-            //    return;
-
             AppDomain.CurrentDomain.AssemblyResolve += CurrentDomain_AssemblyResolve;
 
-            // create profile bin
-            ProfileCreator profileCreator = new ProfileCreator();
-            profileCreator.CreateProfiles();
+            if (args.Length == 0)
+            {
+                ProfileCreator profileCreator = new ProfileCreator();
+                profileCreator.CreateProfiles();
+                Console.WriteLine("Profiles.bin created.");
+                return;
+            }
+
+            ProfilesLibrary.Initialize(new[]
+            {
+                new CollegeFootball27Profile().CreateProfile(),
+                new CollegeFootball27TrialProfile().CreateProfile()
+            });
+
+            string command = args[0].ToLower();
+            if (command == "export")
+            {
+                Export(args);
+                return;
+            }
+
+            Console.WriteLine("Unknown command.");
+            Console.WriteLine("Usage: FrostyCmd export <game exe or game dir> <output dir> [--profile CollegeFB27] [--types ebx,res,chunk] [--filter text] [--limit count]");
 
             //string basePath = args[0];
             //string command = args[1].ToLower();
@@ -225,6 +243,170 @@ namespace FrostyCmd
             //    am.SetLogger(logger);
             //    am.Initialize(false);
             //}
+        }
+
+        private static void Export(string[] args)
+        {
+            if (args.Length < 3)
+            {
+                Console.WriteLine("Usage: FrostyCmd export <game exe or game dir> <output dir> [--profile CollegeFB27] [--types ebx,res,chunk] [--filter text] [--limit count]");
+                return;
+            }
+
+            string gameArg = args[1];
+            string outDir = args[2];
+            string profile = null;
+            string filter = null;
+            string types = "ebx,res,chunk";
+            int limit = 0;
+
+            for (int i = 3; i < args.Length; i++)
+            {
+                string arg = args[i].ToLower();
+                if (arg == "--profile" && i + 1 < args.Length)
+                    profile = args[++i];
+                else if (arg == "--filter" && i + 1 < args.Length)
+                    filter = args[++i];
+                else if (arg == "--types" && i + 1 < args.Length)
+                    types = args[++i].ToLower();
+                else if (arg == "--limit" && i + 1 < args.Length)
+                    int.TryParse(args[++i], out limit);
+            }
+
+            FileInfo gameFile;
+            if (Directory.Exists(gameArg))
+            {
+                string exe = Path.Combine(gameArg, "CollegeFB27.exe");
+                if (!File.Exists(exe))
+                    exe = Directory.EnumerateFiles(gameArg, "*.exe").FirstOrDefault();
+                gameFile = new FileInfo(exe ?? gameArg);
+            }
+            else
+            {
+                gameFile = new FileInfo(gameArg);
+            }
+
+            if (!gameFile.Exists)
+            {
+                Console.WriteLine("Could not find game executable: " + gameArg);
+                return;
+            }
+
+            if (string.IsNullOrEmpty(profile))
+                profile = Path.GetFileNameWithoutExtension(gameFile.Name);
+
+            if (!ProfilesLibrary.Initialize(profile))
+            {
+                Console.WriteLine("Could not initialize profile: " + profile);
+                return;
+            }
+
+            Directory.CreateDirectory(outDir);
+
+            FileSystem fs = new FileSystem(gameFile.DirectoryName);
+            foreach (FileSystemSource source in ProfilesLibrary.Sources)
+                fs.AddSource(source.Path, source.SubDirs);
+            fs.Initialize(KeyManager.Instance.GetKey("Key1"));
+
+            ResourceManager rm = new ResourceManager(fs);
+            rm.SetLogger(logger);
+            rm.Initialize();
+
+            AssetManager am = new AssetManager(fs, rm);
+            am.SetLogger(logger);
+            am.Initialize(false);
+
+            int exported = 0;
+            if (types.Contains("ebx"))
+            {
+                foreach (EbxAssetEntry entry in am.EnumerateEbx())
+                {
+                    if (!MatchesFilter(entry, filter))
+                        continue;
+                    if (ExportStream(am.GetEbxStream(entry), Path.Combine(outDir, "ebx", SafePath(entry.Name) + ".ebx")))
+                        exported++;
+                    if (limit > 0 && exported >= limit)
+                        break;
+                }
+            }
+
+            if (limit == 0 || exported < limit)
+            {
+                if (types.Contains("res"))
+                {
+                    foreach (ResAssetEntry entry in am.EnumerateRes())
+                    {
+                        if (!MatchesFilter(entry, filter))
+                            continue;
+                        string path = Path.Combine(outDir, "res", entry.Type, SafePath(entry.Name) + ".res");
+                        if (ExportStream(am.GetRes(entry), path))
+                            exported++;
+                        if (limit > 0 && exported >= limit)
+                            break;
+                    }
+                }
+            }
+
+            if (limit == 0 || exported < limit)
+            {
+                if (types.Contains("chunk"))
+                {
+                    foreach (ChunkAssetEntry entry in am.EnumerateChunks())
+                    {
+                        if (!MatchesFilter(entry, filter))
+                            continue;
+                        if (ExportStream(am.GetChunk(entry), Path.Combine(outDir, "chunks", entry.Id + ".chunk")))
+                            exported++;
+                        if (limit > 0 && exported >= limit)
+                            break;
+                    }
+                }
+            }
+
+            Console.WriteLine("Exported {0} files to {1}", exported, outDir);
+        }
+
+        private static bool MatchesFilter(AssetEntry entry, string filter)
+        {
+            if (string.IsNullOrEmpty(filter))
+                return true;
+
+            return (entry.Name != null && entry.Name.IndexOf(filter, StringComparison.OrdinalIgnoreCase) != -1)
+                || (entry.Type != null && entry.Type.IndexOf(filter, StringComparison.OrdinalIgnoreCase) != -1)
+                || (entry.AssetType != null && entry.AssetType.IndexOf(filter, StringComparison.OrdinalIgnoreCase) != -1);
+        }
+
+        private static bool ExportStream(Stream stream, string path)
+        {
+            if (stream == null)
+                return false;
+
+            using (stream)
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(path));
+                using (FileStream outStream = new FileStream(path, FileMode.Create, FileAccess.Write))
+                    stream.CopyTo(outStream);
+            }
+            return true;
+        }
+
+        private static string SafePath(string name)
+        {
+            if (string.IsNullOrEmpty(name))
+                return "_unnamed";
+
+            StringBuilder sb = new StringBuilder(name.Length);
+            foreach (char c in name.Replace('/', Path.DirectorySeparatorChar).Replace('\\', Path.DirectorySeparatorChar))
+            {
+                if (c == Path.DirectorySeparatorChar)
+                {
+                    sb.Append(c);
+                    continue;
+                }
+
+                sb.Append(Array.IndexOf(Path.GetInvalidFileNameChars(), c) >= 0 ? '_' : c);
+            }
+            return sb.ToString();
         }
 
         private static System.Reflection.Assembly CurrentDomain_AssemblyResolve(object sender, ResolveEventArgs args)

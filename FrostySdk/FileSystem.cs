@@ -51,6 +51,8 @@ namespace FrostySdk
     {
         public Guid Id;
         public string Name;
+        public string InstallBundle;
+        public uint PersistentIndex;
         public bool AlwaysInstalled;
         public Dictionary<string, bool> SuperBundles = new Dictionary<string, bool>();
     }
@@ -89,6 +91,7 @@ namespace FrostySdk
         private List<string> paths = new List<string>();
         private List<string> superBundles = new List<string>();
         private List<CatalogInfo> catalogs = new List<CatalogInfo>();
+        private Dictionary<uint, int> catalogPersistentIndices = new Dictionary<uint, int>();
         private Dictionary<string, byte[]> memoryFs = new Dictionary<string, byte[]>();
         private List<string> casFiles = new List<string>();
         private readonly Type deobfuscatorType;
@@ -257,6 +260,15 @@ namespace FrostySdk
             return ((patch) ? "native_patch/" : "native_data/") + ci.Name + "/cas_" + cas.ToString("D2") + ".cas";
         }
 
+        public int GetCatalogIndexFromInstallChunkIndex(uint installChunkIndex)
+        {
+            if (catalogPersistentIndices.ContainsKey(installChunkIndex))
+                return catalogPersistentIndices[installChunkIndex];
+
+            int index = (int)installChunkIndex;
+            return index >= 0 && index < catalogs.Count ? index : -1;
+        }
+
         private void LoadInitfs(byte[] key, bool patched = true)
         {
             string path = ResolvePath((patched ? "" : "native_data/") + "initfs_win32");
@@ -393,7 +405,10 @@ namespace FrostySdk
 
                     bool alwaysInstalled = installChunk.GetValue<bool>("alwaysInstalled");
 
-                    string path = "win32/" + installChunk.GetValue<string>("name");
+                    string installBundle = installChunk.GetValue<string>("installBundle");
+                    string path = !string.IsNullOrEmpty(installBundle)
+                        ? installBundle.Trim('/').ToLower()
+                        : "win32/" + installChunk.GetValue<string>("name").Trim('/').ToLower();
 
                     // @hack: Ensure that BFV can pass correctly (catalog doesnt exist)
                     if (ProfilesLibrary.DataVersion == (int)ProfileVersion.Battlefield5 || ProfilesLibrary.DataVersion == (int)ProfileVersion.StarWarsSquadrons)
@@ -404,6 +419,7 @@ namespace FrostySdk
                     {
                         // FIFA19 - Doesnt have Cat files
                         if ((!installChunk.HasValue("files") || installChunk.GetValue<DbObject>("files").Count == 0) && (ProfilesLibrary.DataVersion != (int)ProfileVersion.Anthem
+                            && ProfilesLibrary.DataVersion != (int)ProfileVersion.Madden20
                             && ProfilesLibrary.DataVersion != (int)ProfileVersion.PlantsVsZombiesBattleforNeighborville && ProfilesLibrary.DataVersion != (int)ProfileVersion.NeedForSpeedHeat
                             ))
                         {
@@ -423,6 +439,8 @@ namespace FrostySdk
                         {
                             Id = installChunk.GetValue<Guid>("id"),
                             Name = path,
+                            InstallBundle = installBundle,
+                            PersistentIndex = installChunk.GetValue<uint>("persistentIndex"),
                             AlwaysInstalled = alwaysInstalled
                         };
 
@@ -431,6 +449,7 @@ namespace FrostySdk
                     }
 
                     catalogs.Add(info);
+                    catalogPersistentIndices[info.PersistentIndex] = catalogs.Count - 1;
 
                     if (installChunk.HasValue("files"))
                     {
@@ -580,6 +599,7 @@ namespace FrostySdk
             manifestChunks.Clear();
             catalogs.Clear();
             superBundles.Clear();
+            catalogPersistentIndices.Clear();
 
             ProcessLayouts();
         }

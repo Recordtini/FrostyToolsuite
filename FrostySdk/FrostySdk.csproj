@@ -118,6 +118,7 @@
     <Compile Include="Managers\Loaders\PVZAssetLoader.cs" />
     <Compile Include="Managers\Loaders\FifaAssetLoader.cs" />
     <Compile Include="Managers\Loaders\LegacyAssetLoader.cs" />
+    <Compile Include="Managers\Loaders\Manifest2019AssetLoader.cs" />
     <Compile Include="Managers\Loaders\ManifestAssetLoader.cs" />
     <Compile Include="Managers\Loaders\StandardAssetLoader.cs" />
     <Compile Include="Managers\ResourceManager.cs" />
