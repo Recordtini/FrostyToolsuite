@@ -45,7 +45,7 @@ namespace CFBProfilePlugin
                 RequiresKey = false,
                 MustAddChunks = false,
                 EnableExecution = false,
-                ContainsEAC = true,
+                ContainsEAC = false,
                 DefaultDiffuse = "Longshot/Common/Debug_Grey",
                 DefaultNormals = "content/common/textures/debug/debug_texture_norm",
                 DefaultMask = "content/Common/textures/debug/debug_texture_coeff",
