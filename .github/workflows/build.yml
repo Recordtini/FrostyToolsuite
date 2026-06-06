@@ -90,6 +90,29 @@ jobs:
             }
           }
 
+      - name: Package vgmstream audio decoder
+        shell: pwsh
+        run: |
+          $version = "r2117"
+          $expectedHash = "6C4A8A3813864FEFED081BBD337DBC0AD93BF88E0B92F5DB98D7AB258B22DC6C"
+          $archive = Join-Path $env:RUNNER_TEMP "vgmstream-win64.zip"
+          $destination = "FrostyEditor\bin\Developer\Debug\ThirdParty\vgmstream"
+
+          Invoke-WebRequest `
+            -Uri "https://github.com/vgmstream/vgmstream/releases/download/$version/vgmstream-win64.zip" `
+            -OutFile $archive
+
+          $actualHash = (Get-FileHash $archive -Algorithm SHA256).Hash
+          if ($actualHash -ne $expectedHash) {
+            throw "vgmstream archive hash mismatch: $actualHash"
+          }
+
+          New-Item -ItemType Directory -Force $destination | Out-Null
+          Expand-Archive -LiteralPath $archive -DestinationPath $destination -Force
+          if (-not (Test-Path "$destination\vgmstream-cli.exe")) {
+            throw "vgmstream-cli.exe was not packaged."
+          }
+
       - name: Upload editor artifact
         uses: actions/upload-artifact@v4
         with:

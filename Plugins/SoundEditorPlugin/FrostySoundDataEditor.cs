@@ -202,6 +202,10 @@ namespace SoundEditorPlugin
         public short[] Samples { get; set; }
         public uint LoopStart { get; set; }
         public uint LoopEnd { get; set; }
+        public bool CanPlay => ChannelCount > 0
+            && SampleRate > 0
+            && Samples != null
+            && Samples.Length >= ChannelCount;
 
         public double Progress { get => progress; set { progress = value; NotifyPropertyChanged(); } }
         private double progress;
@@ -228,6 +232,9 @@ namespace SoundEditorPlugin
 
         public SoundWave(SoundDataTrack inTrack, AudioPlayer player)
         {
+            if (inTrack == null || !inTrack.CanPlay)
+                throw new InvalidOperationException("The selected sound track has no decoded audio.");
+
             track = inTrack;
 
             WaveFormatExtensible format = new WaveFormatExtensible(track.SampleRate, 16, track.ChannelCount);
@@ -312,6 +319,9 @@ namespace SoundEditorPlugin
 
         public void PlaySound(SoundDataTrack track)
         {
+            if (track == null || !track.CanPlay)
+                return;
+
             SoundDispose();
 
             currentSound = new SoundWave(track, this);
@@ -429,6 +439,13 @@ namespace SoundEditorPlugin
         {
             if (!(tracksListBox.SelectedItem is SoundDataTrack currentTrack))
                 return;
+            if (!currentTrack.CanPlay)
+            {
+                logger.LogWarning(
+                    "Track '{0}' cannot be played because it has no decoded audio.",
+                    currentTrack.Name);
+                return;
+            }
 
             audioPlayer.OutputVoice.SetVolume((float)(volumeSlider.Value / 100.0));
             audioPlayer.PlaySound(currentTrack);
@@ -468,8 +485,8 @@ namespace SoundEditorPlugin
             if (tracksListBox.SelectedItem == null)
                 return;
 
-            if (!IsPlaying)
-                playButton.IsEnabled = true;
+            if (!IsPlaying && tracksListBox.SelectedItem is SoundDataTrack track)
+                playButton.IsEnabled = track.CanPlay;
         }
 
         public override void Closed()
@@ -506,6 +523,13 @@ namespace SoundEditorPlugin
         {
             if (!(tracksListBox.SelectedItem is SoundDataTrack track))
                 return;
+            if (!track.CanPlay)
+            {
+                logger.LogWarning(
+                    "Track '{0}' cannot be exported because it has no decoded audio.",
+                    track.Name);
+                return;
+            }
 
             FrostySaveFileDialog sfd = new FrostySaveFileDialog("Save WAV File", "WAV file (*.wav)|*.wav", "Sound", AssetEntry.Filename);
 
