@@ -426,6 +426,24 @@ namespace FrostyCmd
                 Console.WriteLine(texture == null
                     ? "Texture payload: unreadable"
                     : $"Texture payload: {texture.Width}x{texture.Height}, {texture.PixelFormat}");
+                if (texture != null)
+                {
+                    Console.WriteLine("Texture type: " + texture.Type);
+                    Console.WriteLine("Texture depth/slices: " + texture.Depth + "/" + texture.SliceCount);
+                    Console.WriteLine("Texture mips: " + texture.MipCount + " (first " + texture.FirstMip + ")");
+                    Console.WriteLine("Texture chunk: " + texture.ChunkId + " ("
+                        + (assetManager.GetChunkEntry(texture.ChunkId) != null ? "indexed" : "missing") + ")");
+                    Console.WriteLine("Texture data size: "
+                        + (texture.Data?.Length.ToString() ?? "unavailable"));
+                    using (Stream originalHeader = assetManager.GetRes(namedResource))
+                    {
+                        byte[] originalBytes = NativeReader.ReadInStream(originalHeader);
+                        byte[] savedBytes = texture.SaveBytes();
+                        Console.WriteLine("Texture header round-trip: "
+                            + (originalBytes.SequenceEqual(savedBytes) ? "matching" : "different")
+                            + " (" + originalBytes.Length + " bytes)");
+                    }
+                }
             }
             else if (namedResource.ResType == (uint)ResourceType.MeshSet)
             {
