@@ -22,9 +22,19 @@ namespace FrostySdk.BaseProfile
         private uint metaOffset;
         private uint metaSize;
 
-        private Endian endian = Endian.Big;
+        private readonly Endian endian;
 
         private List<Sha1> sha1 = new List<Sha1>();
+
+        public BaseBinarySbReader()
+            : this(Endian.Big)
+        {
+        }
+
+        protected BaseBinarySbReader(Endian inEndian)
+        {
+            endian = inEndian;
+        }
 
         public DbObject ReadDbObject(DbReader reader, bool containsUncompressedData, long bundleOffset)
         {

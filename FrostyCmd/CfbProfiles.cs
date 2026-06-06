@@ -9,12 +9,10 @@ namespace FrostyCmd
 {
     internal class CollegeFootball27Profile : IProfile
     {
-        private readonly BaseFrostyProfile baseProfile = new BaseFrostyProfile();
-
-        public Type BinarySbReaderType => baseProfile.BinarySbReaderType;
+        public Type BinarySbReaderType => typeof(Manifest2019BinarySbReader);
         public Type CompressionUtilsType => typeof(CollegeFootball27CompressionUtils);
 
-        public IBinarySbReader GetBinarySbReader() => baseProfile.GetBinarySbReader();
+        public IBinarySbReader GetBinarySbReader() => new Manifest2019BinarySbReader();
         public ICompressionUtils GetCompressionUtils() => new CollegeFootball27CompressionUtils();
 
         public virtual Profile CreateProfile()
