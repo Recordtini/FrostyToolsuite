@@ -603,7 +603,33 @@ namespace FrostySdk.Managers
             DateTime StartTime = DateTime.Now;
             List<EbxAssetEntry> prePatchCache = new List<EbxAssetEntry>();
 
-            if (!ReadFromCache(out prePatchCache))
+            bool loadedFromCache = false;
+            try
+            {
+                loadedFromCache = ReadFromCache(out prePatchCache);
+            }
+            catch (Exception ex)
+            {
+                WriteToLog("Asset cache is invalid and will be regenerated: {0}", ex.Message);
+                ResetCachedAssets();
+                prePatchCache = null;
+
+                string cachePath = fs.CacheName + ".cache";
+                try
+                {
+                    File.Delete(cachePath);
+                }
+                catch (IOException)
+                {
+                    // A locked cache can still be ignored for this run.
+                }
+                catch (UnauthorizedAccessException)
+                {
+                    // A read-only cache can still be ignored for this run.
+                }
+            }
+
+            if (!loadedFromCache)
             {
                 BinarySbDataHelper helper = new BinarySbDataHelper(this);
 
@@ -716,6 +742,17 @@ namespace FrostySdk.Managers
                     TypeLibrary.Reflection.LoadClassInfoAssets(this);
                 }
             }
+        }
+
+        private void ResetCachedAssets()
+        {
+            superBundles.Clear();
+            bundles.Clear();
+            ebxList.Clear();
+            resList.Clear();
+            chunkList.Clear();
+            ebxGuidList.Clear();
+            resRidList.Clear();
         }
 
         public void SetLogger(ILogger inLogger) => logger = inLogger;
@@ -2263,7 +2300,8 @@ namespace FrostySdk.Managers
 
         private void WriteToCache()
         {
-            FileInfo fi = new FileInfo(fs.CacheName + ".cache");
+            string cachePath = fs.CacheName + ".cache";
+            FileInfo fi = new FileInfo(cachePath + ".tmp");
             if (!Directory.Exists(fi.DirectoryName))
                 Directory.CreateDirectory(fi.DirectoryName);
 
@@ -2414,6 +2452,9 @@ namespace FrostySdk.Managers
                     WriteToLog(string.Format("progress:{0}", (double)i / (double)chunkList.Count * 100.0));
                 }
             }
+
+            File.Delete(cachePath);
+            File.Move(fi.FullName, cachePath);
         }
 
         private void WriteToLog(string text, params object[] vars) => logger?.Log(text, vars);
