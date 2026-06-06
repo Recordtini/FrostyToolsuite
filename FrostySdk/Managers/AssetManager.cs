@@ -645,7 +645,7 @@ namespace FrostySdk.Managers
                 GC.Collect();
 
                 if (usesRawEbxIndex)
-                    MarkEbxAsRaw();
+                    ClassifyRiffEbxAssets();
 
                 // if there is not additional startup or the ebxGuidList has items, write the cache
                 if (!additionalStartup || ebxGuidList.Count > 0 || usesRawEbxIndex)
@@ -661,7 +661,10 @@ namespace FrostySdk.Managers
             {
                 // index those ebx
                 if (usesRawEbxIndex)
+                {
+                    ClassifyRiffEbxAssets();
                     WriteToLog("Skipping eager EBX type indexing for College Football 27; raw EBX export remains available.");
+                }
                 else
                     DoEbxIndexing();
 
@@ -752,12 +755,72 @@ namespace FrostySdk.Managers
             }
         }
 
-        private void MarkEbxAsRaw()
+        private void ClassifyRiffEbxAssets()
         {
             foreach (EbxAssetEntry entry in ebxList.Values)
             {
-                if (string.IsNullOrEmpty(entry.Type))
-                    entry.Type = "UnsupportedEbx";
+                if (!string.IsNullOrEmpty(entry.Type)
+                    && entry.Type != "UnsupportedEbx"
+                    && entry.Type != "RiffEbxAsset")
+                    continue;
+
+                if (resList.TryGetValue(entry.Name, out ResAssetEntry resource))
+                {
+                    if (resource.ResType == (uint)ResourceType.Texture)
+                    {
+                        entry.Type = "TextureAsset";
+                        continue;
+                    }
+                    if (resource.ResType == (uint)ResourceType.MeshSet)
+                    {
+                        entry.Type = "MeshAsset";
+                        continue;
+                    }
+                }
+
+                entry.Type = "RiffEbxAsset";
+            }
+        }
+
+        public bool ResolveEbxMetadata(EbxAssetEntry entry)
+        {
+            if (entry == null)
+                return false;
+            if (ProfilesLibrary.ProfileName != "CollegeFB27"
+                && ProfilesLibrary.ProfileName != "CollegeFB27_Trial")
+                return entry.Type != "UnsupportedEbx";
+
+            Stream stream = GetEbxStream(entry);
+            if (stream == null)
+                return false;
+
+            try
+            {
+                using (stream)
+                using (EbxReader reader = EbxReader.CreateReader(stream, fs))
+                {
+                    if (!reader.IsValid)
+                        return false;
+
+                    string rootType = reader.RootType;
+                    entry.Type = string.IsNullOrEmpty(rootType) ? "RiffEbxAsset" : rootType;
+                    entry.Guid = reader.FileGuid;
+                    foreach (Guid dependency in reader.Dependencies)
+                    {
+                        if (!entry.ContainsDependency(dependency))
+                            entry.DependentAssets.Add(dependency);
+                    }
+
+                    if (entry.Guid != Guid.Empty && !ebxGuidList.ContainsKey(entry.Guid))
+                        ebxGuidList.Add(entry.Guid, entry);
+                    return true;
+                }
+            }
+            catch (Exception ex) when (!(ex is OutOfMemoryException))
+            {
+                WriteToLog("Unable to read RIFF EBX metadata for '{0}': {1}", entry.Name, ex.Message);
+                entry.Type = "RiffEbxAsset";
+                return false;
             }
         }
 
@@ -1597,7 +1660,9 @@ namespace FrostySdk.Managers
 
         public T GetEbxAs<T>(EbxAssetEntry entry) where T : EbxAsset, new()
         {
-            if (entry == null || entry.Type == "UnsupportedEbx")
+            if (entry == null || (entry.Type == "UnsupportedEbx"
+                && ProfilesLibrary.ProfileName != "CollegeFB27"
+                && ProfilesLibrary.ProfileName != "CollegeFB27_Trial"))
                 return null;
 
             // return modified data as a data object
@@ -1627,7 +1692,9 @@ namespace FrostySdk.Managers
 
         public EbxAsset GetEbx(EbxAssetEntry entry, bool getUnmodifiedData = false)
         {
-            if (entry == null || entry.Type == "UnsupportedEbx")
+            if (entry == null || (entry.Type == "UnsupportedEbx"
+                && ProfilesLibrary.ProfileName != "CollegeFB27"
+                && ProfilesLibrary.ProfileName != "CollegeFB27_Trial"))
                 return null;
 
             // return modified data as a data object

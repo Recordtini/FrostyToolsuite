@@ -715,6 +715,9 @@ namespace FrostyEditor
             if (asset == null)
                 return;
 
+            if (asset is EbxAssetEntry ebxEntry)
+                App.AssetManager.ResolveEbxMetadata(ebxEntry);
+
             if (asset.Type == "EncryptedAsset")
                 return;
 
@@ -995,6 +998,7 @@ namespace FrostyEditor
         private void contextMenuImportEbx_Click(object sender, RoutedEventArgs e)
         {
             EbxAssetEntry entry = dataExplorer.SelectedAsset as EbxAssetEntry;
+            App.AssetManager.ResolveEbxMetadata(entry);
 
             AssetDefinition assetDefinition = App.PluginManager.GetAssetDefinition(entry.Type) ?? new AssetDefinition();
 
@@ -1062,6 +1066,7 @@ namespace FrostyEditor
                 return;
             }
 
+            App.AssetManager.ResolveEbxMetadata(entry);
             AssetDefinition assetDefinition = App.PluginManager.GetAssetDefinition(entry.Type) ?? new AssetDefinition();
 
             List<AssetExportType> filters = new List<AssetExportType>();

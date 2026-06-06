@@ -536,6 +536,9 @@ namespace FrostySdk.IO
 
         public static EbxReader CreateReader(Stream inStream, FileSystem fs = null, bool patched = false)
         {
+            if (RiffEbxReader.IsRiffEbx(inStream))
+                return new RiffEbxReader(inStream);
+
             return (ProfilesLibrary.EbxVersion & 1) != 0 ? new EbxReaderV2(inStream, fs, patched) : new EbxReader(inStream);
         }
 

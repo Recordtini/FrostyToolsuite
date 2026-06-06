@@ -189,9 +189,14 @@ namespace FrostyCmd
                 Export(args);
                 return;
             }
-
+            if (command == "inspect-ebx")
+            {
+                InspectEbx(args);
+                return;
+            }
             Console.WriteLine("Unknown command.");
-            Console.WriteLine("Usage: FrostyCmd export <game exe or game dir> <output dir> [--profile CollegeFB27] [--types ebx,res,chunk] [--filter text] [--limit count]");
+            Console.WriteLine("Usage: FrostyCmd inspect-ebx <file> [--profile CollegeFB27]");
+            Console.WriteLine("       FrostyCmd export <game exe or game dir> <output dir> [--profile CollegeFB27] [--types ebx,res,chunk] [--filter text] [--limit count]");
 
             //string basePath = args[0];
             //string command = args[1].ToLower();
@@ -243,6 +248,57 @@ namespace FrostyCmd
             //    am.SetLogger(logger);
             //    am.Initialize(false);
             //}
+        }
+
+        private static void InspectEbx(string[] args)
+        {
+            if (args.Length < 2 || !File.Exists(args[1]))
+            {
+                Console.WriteLine("Usage: FrostyCmd inspect-ebx <file> [--profile CollegeFB27]");
+                return;
+            }
+
+            string profile = "CollegeFB27";
+            for (int i = 2; i < args.Length; i++)
+            {
+                if (args[i].Equals("--profile", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
+                    profile = args[++i];
+            }
+
+            if (!ProfilesLibrary.Initialize(profile))
+                throw new InvalidOperationException("Unable to initialize profile " + profile);
+
+            TypeLibrary.Initialize();
+            using (FileStream stream = new FileStream(args[1], FileMode.Open, FileAccess.Read))
+            using (EbxReader reader = EbxReader.CreateReader(stream))
+            {
+                Console.WriteLine("Root type: " + reader.RootType);
+                Console.WriteLine("File GUID: " + reader.FileGuid);
+                Console.WriteLine("Dependencies: " + reader.Dependencies.Count);
+
+                object root = reader.ReadObject();
+                Console.WriteLine("Object type: " + root.GetType().FullName);
+                foreach (PropertyInfo property in root.GetType().GetProperties())
+                {
+                    if (!property.CanRead || property.GetIndexParameters().Length != 0)
+                        continue;
+
+                    object value;
+                    try
+                    {
+                        value = property.GetValue(root);
+                    }
+                    catch
+                    {
+                        continue;
+                    }
+
+                    if (value is System.Collections.ICollection collection)
+                        Console.WriteLine(property.Name + ".Count: " + collection.Count);
+                    else
+                        Console.WriteLine(property.Name + ": " + (value ?? "(null)"));
+                }
+            }
         }
 
         private static void Export(string[] args)

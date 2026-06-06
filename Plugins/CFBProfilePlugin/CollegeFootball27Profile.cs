@@ -39,7 +39,7 @@ namespace CFBProfilePlugin
                 },
                 SDKFilename = "MADDEN20SDK",
                 Banner = new byte[0],
-                EbxVersion = 4,
+                EbxVersion = 6,
                 RequiresKey = false,
                 MustAddChunks = false,
                 EnableExecution = false,
