@@ -582,6 +582,7 @@ namespace Frosty.Core.Viewport
                 case "BC7_UNORM": return SharpDX.DXGI.Format.BC7_Typeless;
                 case "R8_UNORM": return SharpDX.DXGI.Format.R8_Typeless;
                 case "R16G16B16A16_FLOAT": return SharpDX.DXGI.Format.R16G16B16A16_Float;
+                case "R16G16B16A16_UNORM": return SharpDX.DXGI.Format.R16G16B16A16_Typeless;
                 case "ARGB32F": return SharpDX.DXGI.Format.R32G32B32A32_Float;
                 case "R32G32B32A32_FLOAT": return SharpDX.DXGI.Format.R32G32B32A32_Float;
                 case "R9G9B9E5F": return SharpDX.DXGI.Format.R9G9B9E5_Sharedexp;
@@ -634,6 +635,7 @@ namespace Frosty.Core.Viewport
                 case "BC7_UNORM": return SharpDX.DXGI.Format.BC7_UNorm;
                 case "R8_UNORM": return SharpDX.DXGI.Format.R8_UNorm;
                 case "R16G16B16A16_FLOAT": return SharpDX.DXGI.Format.R16G16B16A16_Float;
+                case "R16G16B16A16_UNORM": return SharpDX.DXGI.Format.R16G16B16A16_UNorm;
                 case "ARGB32F": return SharpDX.DXGI.Format.R32G32B32A32_Float;
                 case "R32G32B32A32_FLOAT": return SharpDX.DXGI.Format.R32G32B32A32_Float;
                 case "R9G9B9E5F": return SharpDX.DXGI.Format.R9G9B9E5_Sharedexp;
@@ -736,6 +738,14 @@ namespace Frosty.Core.Viewport
 
         public static D3D11.Texture2D LoadTexture(D3D11.Device device, Texture textureAsset, bool generateMips = false)
         {
+            if (textureAsset == null)
+                throw new ArgumentNullException(nameof(textureAsset));
+            if (textureAsset.Data == null)
+                throw new InvalidDataException("Texture payload is unavailable.");
+            if (textureAsset.Width == 0 || textureAsset.Height == 0
+                || textureAsset.Depth == 0 || textureAsset.MipCount == 0)
+                throw new InvalidDataException("Texture dimensions or mip count are invalid.");
+
             textureAsset.Data.Position = 0;
 
             // cube arrays need to use both slice and depth
@@ -747,6 +757,9 @@ namespace Frosty.Core.Viewport
             ushort height = textureAsset.Height;
 
             SharpDX.DXGI.Format format = TextureUtils.ToTextureFormat(textureAsset.PixelFormat, (textureAsset.Flags & TextureFlags.SrgbGamma) != 0);
+            if (format == SharpDX.DXGI.Format.Unknown)
+                throw new NotSupportedException("Unsupported texture format: " + textureAsset.PixelFormat);
+
             D3D11.ResourceOptionFlags roFlags = D3D11.ResourceOptionFlags.None;
             D3D11.BindFlags bindFlags = D3D11.BindFlags.ShaderResource;
             int mipCount = textureAsset.MipCount;
@@ -827,6 +840,7 @@ namespace Frosty.Core.Viewport
             {
                 case "R8_UNORM":
                 case "R16G16B16A16_FLOAT":
+                case "R16G16B16A16_UNORM":
                 case "R32G32B32A32_FLOAT":
                 case "R9G9B9E5_FLOAT":
                 case "R8G8B8A8_UNORM":
@@ -880,6 +894,7 @@ namespace Frosty.Core.Viewport
                     break;
 
                 case "R16G16B16A16_FLOAT":
+                case "R16G16B16A16_UNORM":
                     blockSize = 64;
                     break;
 

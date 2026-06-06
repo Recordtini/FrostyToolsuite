@@ -1,6 +1,7 @@
 ﻿using Frosty.Core.Viewport;
 using FrostySdk.Resources;
 using SharpDX.D3DCompiler;
+using System;
 using System.Runtime.InteropServices;
 using D3D11 = SharpDX.Direct3D11;
 
@@ -143,24 +144,51 @@ namespace Frosty.Core.Screens
             if (recreateTexture)
             {
                 textureSRV?.Dispose();
+                textureSRV = null;
+                texture?.Dispose();
+                texture = null;
 
-                texture = TextureUtils.LoadTexture(Viewport.Device, textureAsset);
-
-                // all texture types are represented by a 2D array (even a single T2D, just has one slice)
-                textureSRV = new D3D11.ShaderResourceView(Viewport.Device, texture, new D3D11.ShaderResourceViewDescription()
+                SharpDX.DXGI.Format shaderFormat = TextureUtils.ToShaderFormat(
+                    textureAsset.PixelFormat,
+                    (textureAsset.Flags & TextureFlags.SrgbGamma) != 0);
+                if (shaderFormat == SharpDX.DXGI.Format.Unknown)
                 {
-                    Format = TextureUtils.ToShaderFormat(textureAsset.PixelFormat, (textureAsset.Flags & TextureFlags.SrgbGamma) != 0),
-                    Dimension = SharpDX.Direct3D.ShaderResourceViewDimension.Texture2DArray,
-                    Texture2DArray = new D3D11.ShaderResourceViewDescription.Texture2DArrayResource()
+                    recreateTexture = false;
+                    return;
+                }
+
+                try
+                {
+                    texture = TextureUtils.LoadTexture(Viewport.Device, textureAsset);
+
+                    // all texture types are represented by a 2D array (even a single T2D, just has one slice)
+                    textureSRV = new D3D11.ShaderResourceView(Viewport.Device, texture, new D3D11.ShaderResourceViewDescription()
                     {
-                        ArraySize = texture.Description.ArraySize,
-                        FirstArraySlice = 0,
-                        MipLevels = -1,
-                        MostDetailedMip = 0
-                    }
-                });
+                        Format = shaderFormat,
+                        Dimension = SharpDX.Direct3D.ShaderResourceViewDimension.Texture2DArray,
+                        Texture2DArray = new D3D11.ShaderResourceViewDescription.Texture2DArrayResource()
+                        {
+                            ArraySize = texture.Description.ArraySize,
+                            FirstArraySlice = 0,
+                            MipLevels = -1,
+                            MostDetailedMip = 0
+                        }
+                    });
+                }
+                catch (Exception exception)
+                {
+                    System.Diagnostics.Debug.WriteLine(
+                        "Unable to create texture preview for "
+                        + textureAsset.PixelFormat + ": " + exception);
+                    textureSRV?.Dispose();
+                    textureSRV = null;
+                    texture?.Dispose();
+                    texture = null;
+                }
 
                 recreateTexture = false;
+                if (textureSRV == null)
+                    return;
             }
 
             SharpDX.Matrix channelMask = new SharpDX.Matrix();
@@ -246,7 +274,7 @@ namespace Frosty.Core.Screens
 
             if (texture != null)
             {
-                textureSRV.Dispose();
+                textureSRV?.Dispose();
                 texture.Dispose();
             }
 

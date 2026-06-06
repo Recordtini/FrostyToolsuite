@@ -105,12 +105,21 @@ namespace FrostyEditor.Windows
             // load data from game or cache
             await LoadData(logger, KeyManager.Instance.GetKey("Key1"), result);
 
+            // CFB27 uses the Madden 20 SDK as a compatibility type dictionary. The
+            // legacy updater relies on process memory signatures that do not apply.
+            bool usesCompatibilitySdk = ProfilesLibrary.ProfileName == "CollegeFB27"
+                || ProfilesLibrary.ProfileName == "CollegeFB27_Trial";
+
             // check to make sure SDK is up to date
-            if (TypeLibrary.GetSdkVersion() != App.FileSystem.Head)
+            if (!usesCompatibilitySdk && TypeLibrary.GetSdkVersion() != App.FileSystem.Head)
             {
                 // requires updating
                 SdkUpdateWindow sdkWin = new SdkUpdateWindow(this);
                 sdkWin.ShowDialog();
+            }
+            else if (usesCompatibilitySdk && TypeLibrary.GetSdkVersion() != App.FileSystem.Head)
+            {
+                App.Logger.Log("Using the bundled compatibility SDK for College Football 27; automatic SDK generation is disabled.");
             }
 
             // load strings

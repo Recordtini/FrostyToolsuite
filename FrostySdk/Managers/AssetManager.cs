@@ -602,8 +602,36 @@ namespace FrostySdk.Managers
         {
             DateTime StartTime = DateTime.Now;
             List<EbxAssetEntry> prePatchCache = new List<EbxAssetEntry>();
+            bool usesRawEbxIndex = ProfilesLibrary.ProfileName == "CollegeFB27"
+                || ProfilesLibrary.ProfileName == "CollegeFB27_Trial";
 
-            if (!ReadFromCache(out prePatchCache))
+            bool loadedFromCache = false;
+            try
+            {
+                loadedFromCache = ReadFromCache(out prePatchCache);
+            }
+            catch (Exception ex)
+            {
+                WriteToLog("Asset cache is invalid and will be regenerated: {0}", ex.Message);
+                ResetCachedAssets();
+                prePatchCache = null;
+
+                string cachePath = fs.CacheName + ".cache";
+                try
+                {
+                    File.Delete(cachePath);
+                }
+                catch (IOException)
+                {
+                    // A locked cache can still be ignored for this run.
+                }
+                catch (UnauthorizedAccessException)
+                {
+                    // A read-only cache can still be ignored for this run.
+                }
+            }
+
+            if (!loadedFromCache)
             {
                 BinarySbDataHelper helper = new BinarySbDataHelper(this);
 
@@ -616,11 +644,18 @@ namespace FrostySdk.Managers
 
                 GC.Collect();
 
+                if (usesRawEbxIndex)
+                    ClassifyRiffEbxAssets();
+
                 // if there is not additional startup or the ebxGuidList has items, write the cache
-                if (!additionalStartup || ebxGuidList.Count > 0)
+                if (!additionalStartup || ebxGuidList.Count > 0 || usesRawEbxIndex)
                 {
                     WriteToCache();
                 }
+            }
+            else if (usesRawEbxIndex)
+            {
+                ClassifyRiffEbxAssets();
             }
 
             TimeSpan ElapsedTime = DateTime.Now - StartTime;
@@ -629,7 +664,13 @@ namespace FrostySdk.Managers
             if (additionalStartup)
             {
                 // index those ebx
-                DoEbxIndexing();
+                if (usesRawEbxIndex)
+                {
+                    ClassifyRiffEbxAssets();
+                    WriteToLog("Skipping eager EBX type indexing for College Football 27; raw EBX export remains available.");
+                }
+                else
+                    DoEbxIndexing();
 
                 // determine if bundle is a blueprint bundle or a shared bundle
                 foreach (BundleEntry bundle in bundles)
@@ -718,6 +759,104 @@ namespace FrostySdk.Managers
             }
         }
 
+        private void ClassifyRiffEbxAssets()
+        {
+            foreach (ResAssetEntry resource in resList.Values)
+                resource.ResType = NormalizeCfbResourceType(resource.ResType);
+
+            foreach (EbxAssetEntry entry in ebxList.Values)
+            {
+                if (!string.IsNullOrEmpty(entry.Type)
+                    && entry.Type != "UnsupportedEbx"
+                    && entry.Type != "RiffEbxAsset")
+                    continue;
+
+                if (resList.TryGetValue(entry.Name, out ResAssetEntry resource))
+                {
+                    if (resource.ResType == (uint)ResourceType.Texture)
+                    {
+                        entry.Type = "TextureAsset";
+                        continue;
+                    }
+                    if (resource.ResType == (uint)ResourceType.MeshSet)
+                    {
+                        entry.Type = "MeshAsset";
+                        continue;
+                    }
+                    if (resource.ResType == (uint)ResourceType.NewWaveResource)
+                    {
+                        entry.Type = "NewWaveAsset";
+                        continue;
+                    }
+                }
+
+                entry.Type = "RiffEbxAsset";
+            }
+        }
+
+        private static uint NormalizeCfbResourceType(uint resourceType)
+        {
+            uint reversed = ((resourceType & 0x000000FFu) << 24)
+                | ((resourceType & 0x0000FF00u) << 8)
+                | ((resourceType & 0x00FF0000u) >> 8)
+                | ((resourceType & 0xFF000000u) >> 24);
+
+            return Enum.IsDefined(typeof(ResourceType), reversed) ? reversed : resourceType;
+        }
+
+        public bool ResolveEbxMetadata(EbxAssetEntry entry)
+        {
+            if (entry == null)
+                return false;
+            if (ProfilesLibrary.ProfileName != "CollegeFB27"
+                && ProfilesLibrary.ProfileName != "CollegeFB27_Trial")
+                return entry.Type != "UnsupportedEbx";
+
+            Stream stream = GetEbxStream(entry);
+            if (stream == null)
+                return false;
+
+            try
+            {
+                using (stream)
+                using (EbxReader reader = EbxReader.CreateReader(stream, fs))
+                {
+                    if (!reader.IsValid)
+                        return false;
+
+                    string rootType = reader.RootType;
+                    entry.Type = string.IsNullOrEmpty(rootType) ? "RiffEbxAsset" : rootType;
+                    entry.Guid = reader.FileGuid;
+                    foreach (Guid dependency in reader.Dependencies)
+                    {
+                        if (!entry.ContainsDependency(dependency))
+                            entry.DependentAssets.Add(dependency);
+                    }
+
+                    if (entry.Guid != Guid.Empty && !ebxGuidList.ContainsKey(entry.Guid))
+                        ebxGuidList.Add(entry.Guid, entry);
+                    return true;
+                }
+            }
+            catch (Exception ex) when (!(ex is OutOfMemoryException))
+            {
+                WriteToLog("Unable to read RIFF EBX metadata for '{0}': {1}", entry.Name, ex.Message);
+                entry.Type = "RiffEbxAsset";
+                return false;
+            }
+        }
+
+        private void ResetCachedAssets()
+        {
+            superBundles.Clear();
+            bundles.Clear();
+            ebxList.Clear();
+            resList.Clear();
+            chunkList.Clear();
+            ebxGuidList.Clear();
+            resRidList.Clear();
+        }
+
         public void SetLogger(ILogger inLogger) => logger = inLogger;
 
         public void ClearLogger() => logger = null;
@@ -730,6 +869,7 @@ namespace FrostySdk.Managers
             List<EbxAssetEntry> ebxToRemove = new List<EbxAssetEntry>();
             int assetCount = ebxList.Count;
             int count = 0;
+            int lastProgress = -1;
 
             DateTime startTime = DateTime.Now;
             foreach (EbxAssetEntry entry in ebxList.Values)
@@ -751,33 +891,51 @@ namespace FrostySdk.Managers
 
                 if (stream != null)
                 {
-                    using (EbxReader reader = EbxReader.CreateReader(stream, fs, patched))
+                    try
                     {
-                        entry.Type = reader.RootType;
-                        entry.Guid = reader.FileGuid;
-
-                        // now grab the actual asset name
-                        reader.Position = reader.stringsOffset;
-                        string name = reader.ReadNullTerminatedString();
-                        int newNameHash = Fnv1.HashString(name.ToLower());
-
-                        // only if the lower case one matches
-                        if (newNameHash == nameHash)
-                            entry.Name = name;
-
-                        foreach (EbxImportReference import in reader.imports)
+                        using (EbxReader reader = EbxReader.CreateReader(stream, fs, patched))
                         {
-                            if (!entry.ContainsDependency(import.FileGuid))
-                                entry.DependentAssets.Add(import.FileGuid);
+                            string rootType = reader.RootType;
+                            if (string.IsNullOrEmpty(rootType))
+                            {
+                                entry.Type = "UnsupportedEbx";
+                                WriteToLog("Unsupported EBX header: {0}", entry.Name);
+                            }
+                            else
+                            {
+                                entry.Type = rootType;
+                                entry.Guid = reader.FileGuid;
 
-                        }
+                                // now grab the actual asset name
+                                reader.Position = reader.stringsOffset;
+                                string name = reader.ReadNullTerminatedString();
+                                int newNameHash = Fnv1.HashString(name.ToLower());
 
-                        if (ebxGuidList.ContainsKey(entry.Guid))
-                        {
-                            //logger.Log("Existing asset found with same guid '{0}'", entry.Guid);
-                            continue;
+                                // only if the lower case one matches
+                                if (newNameHash == nameHash)
+                                    entry.Name = name;
+
+                                foreach (EbxImportReference import in reader.imports)
+                                {
+                                    if (!entry.ContainsDependency(import.FileGuid))
+                                        entry.DependentAssets.Add(import.FileGuid);
+                                }
+
+                                if (ebxGuidList.ContainsKey(entry.Guid))
+                                {
+                                    //logger.Log("Existing asset found with same guid '{0}'", entry.Guid);
+                                    continue;
+                                }
+
+                                ebxGuidList.Add(entry.Guid, entry);
+                            }
                         }
-                        ebxGuidList.Add(entry.Guid, entry);
+                    }
+                    catch (Exception ex) when (!(ex is OutOfMemoryException))
+                    {
+                        entry.Type = "UnsupportedEbx";
+                        entry.Guid = Guid.Empty;
+                        WriteToLog("Unable to index EBX '{0}': {1}", entry.Name, ex.Message);
                     }
                 }
                 else
@@ -814,8 +972,13 @@ namespace FrostySdk.Managers
                 }
 
                 count++;
-                WriteToLog("Initial load - Indexing data ({0}%)", (int)((count / (double)assetCount) * 100.0));
-                WriteToLog("progress:{0}", ((count / (double)assetCount) * 100.0d));
+                int progress = (int)((count / (double)assetCount) * 100.0);
+                if (progress != lastProgress)
+                {
+                    lastProgress = progress;
+                    WriteToLog("Initial load - Indexing data ({0}%)", progress);
+                    WriteToLog("progress:{0}", progress);
+                }
             }
 
             foreach (EbxAssetEntry entry in ebxToRemove)
@@ -1519,6 +1682,11 @@ namespace FrostySdk.Managers
 
         public T GetEbxAs<T>(EbxAssetEntry entry) where T : EbxAsset, new()
         {
+            if (entry == null || (entry.Type == "UnsupportedEbx"
+                && ProfilesLibrary.ProfileName != "CollegeFB27"
+                && ProfilesLibrary.ProfileName != "CollegeFB27_Trial"))
+                return null;
+
             // return modified data as a data object
             ModifiedResource modifiedResource = null;
             if (entry.ModifiedEntry?.DataObject != null)
@@ -1546,6 +1714,11 @@ namespace FrostySdk.Managers
 
         public EbxAsset GetEbx(EbxAssetEntry entry, bool getUnmodifiedData = false)
         {
+            if (entry == null || (entry.Type == "UnsupportedEbx"
+                && ProfilesLibrary.ProfileName != "CollegeFB27"
+                && ProfilesLibrary.ProfileName != "CollegeFB27_Trial"))
+                return null;
+
             // return modified data as a data object
             if ((entry.ModifiedEntry?.DataObject as EbxAsset) != null && !getUnmodifiedData)
                 return entry.ModifiedEntry.DataObject as EbxAsset;
@@ -1632,6 +1805,9 @@ namespace FrostySdk.Managers
 
         private Stream GetAsset(AssetEntry entry)
         {
+            if (entry == null)
+                return null;
+
             // return modified data
             if (entry.ModifiedEntry != null && entry.ModifiedEntry.Data != null)
                 return rm.GetResourceData(entry.ModifiedEntry.Data);
@@ -2038,7 +2214,13 @@ namespace FrostySdk.Managers
             WriteToLog("Loading Data (" + fs.CacheName + ".cache)");
             bool bIsPatched = false;
 
-            using (NativeReader reader = new NativeReader(new FileStream(fs.CacheName + ".cache", FileMode.Open, FileAccess.Read)))
+            using (NativeReader reader = new NativeReader(new FileStream(
+                fs.CacheName + ".cache",
+                FileMode.Open,
+                FileAccess.Read,
+                FileShare.Read,
+                1024 * 1024,
+                FileOptions.SequentialScan)))
             {
                 ulong magic = reader.ReadULong();
                 if (magic != CacheMagic)
@@ -2068,6 +2250,7 @@ namespace FrostySdk.Managers
                 }
                 else
                 {
+                    superBundles.Capacity = Math.Max(superBundles.Capacity, count);
                     for (int i = 0; i < count; i++)
                     {
                         SuperBundleEntry sbentry = new SuperBundleEntry {Name = reader.ReadNullTerminatedString()};
@@ -2078,6 +2261,7 @@ namespace FrostySdk.Managers
                 count = reader.ReadInt();
                 if (count == 0)
                     return false;
+                bundles.Capacity = Math.Max(bundles.Capacity, count);
 
                 // bundles
                 for (int i = 0; i < count; i++)
@@ -2098,6 +2282,15 @@ namespace FrostySdk.Managers
 
                 // ebx
                 count = reader.ReadInt();
+                if (!bIsPatched)
+                {
+                    ebxList = new Dictionary<string, EbxAssetEntry>(count, StringComparer.OrdinalIgnoreCase);
+                    bool usesRawEbxIndex = ProfilesLibrary.ProfileName == "CollegeFB27"
+                        || ProfilesLibrary.ProfileName == "CollegeFB27_Trial";
+                    ebxGuidList = usesRawEbxIndex
+                        ? new Dictionary<Guid, EbxAssetEntry>()
+                        : new Dictionary<Guid, EbxAssetEntry>(count);
+                }
                 for (int i = 0; i < count; i++)
                 {
                     EbxAssetEntry entry = new EbxAssetEntry
@@ -2156,6 +2349,11 @@ namespace FrostySdk.Managers
 
                 // res
                 count = reader.ReadInt();
+                if (!bIsPatched)
+                {
+                    resList = new Dictionary<string, ResAssetEntry>(count);
+                    resRidList = new Dictionary<ulong, ResAssetEntry>(count);
+                }
                 for (int i = 0; i < count; i++)
                 {
                     ResAssetEntry entry = new ResAssetEntry
@@ -2202,6 +2400,8 @@ namespace FrostySdk.Managers
 
                 // chunk
                 count = reader.ReadInt();
+                if (!bIsPatched)
+                    chunkList = new Dictionary<Guid, ChunkAssetEntry>(count);
                 for (int i = 0; i < count; i++)
                 {
                     ChunkAssetEntry entry = new ChunkAssetEntry
@@ -2263,11 +2463,18 @@ namespace FrostySdk.Managers
 
         private void WriteToCache()
         {
-            FileInfo fi = new FileInfo(fs.CacheName + ".cache");
+            string cachePath = fs.CacheName + ".cache";
+            FileInfo fi = new FileInfo(cachePath + ".tmp");
             if (!Directory.Exists(fi.DirectoryName))
                 Directory.CreateDirectory(fi.DirectoryName);
 
-            using (NativeWriter writer = new NativeWriter(new FileStream(fi.FullName, FileMode.Create)))
+            using (NativeWriter writer = new NativeWriter(new FileStream(
+                fi.FullName,
+                FileMode.Create,
+                FileAccess.Write,
+                FileShare.None,
+                1024 * 1024,
+                FileOptions.SequentialScan)))
             {
                 writer.Write(CacheMagic);
                 writer.Write(CacheVersion);
@@ -2286,7 +2493,7 @@ namespace FrostySdk.Managers
                     for (int i = 0; i < superBundles.Count; i++)
                     {
                         writer.WriteNullTerminatedString(superBundles[i].Name);
-                        WriteToLog(string.Format("progress:{0}", (double)i / (double)superBundles.Count * 100.0));
+                        WriteCacheProgress(i, superBundles.Count);
                     }
                 }
 
@@ -2298,16 +2505,15 @@ namespace FrostySdk.Managers
                     writer.WriteNullTerminatedString(bundles[i].Name);
                     writer.Write(bundles[i].SuperBundleId);
 
-                    WriteToLog(string.Format("progress:{0}", (double)i / (double)bundles.Count * 100.0));
+                    WriteCacheProgress(i, bundles.Count);
                 }
 
                 WriteToLog("Writing to cache (EBX)");
 
-                writer.Write(ebxList.Values.Count);
-                for (int i = 0; i < ebxList.Count; i++)
+                writer.Write(ebxList.Count);
+                int ebxIndex = 0;
+                foreach (EbxAssetEntry ebx in ebxList.Values)
                 {
-                    EbxAssetEntry ebx = ebxList.Values.ElementAt(i);
-
                     writer.WriteNullTerminatedString(ebx.Name);
                     writer.Write(ebx.Sha1);
                     writer.Write(ebx.Size);
@@ -2337,16 +2543,15 @@ namespace FrostySdk.Managers
                         writer.Write(dependencyGuid);
                     }
 
-                    WriteToLog(string.Format("progress:{0}", (double)i / (double)ebxList.Count * 100.0));
+                    WriteCacheProgress(ebxIndex++, ebxList.Count);
                 }
 
                 WriteToLog("Writing to cache (RES)");
 
-                writer.Write(resList.Values.Count);
-                for (int i = 0; i < resList.Count; i++)
+                writer.Write(resList.Count);
+                int resIndex = 0;
+                foreach (ResAssetEntry res in resList.Values)
                 {
-                    ResAssetEntry res = resList.Values.ElementAt(i);
-
                     writer.WriteNullTerminatedString(res.Name);
                     writer.Write(res.Sha1);
                     writer.Write(res.Size);
@@ -2373,16 +2578,15 @@ namespace FrostySdk.Managers
                         writer.Write(baseBundleId);
                     }
 
-                    WriteToLog(string.Format("progress:{0}", (double)i / (double)resList.Count * 100.0));
+                    WriteCacheProgress(resIndex++, resList.Count);
                 }
 
                 WriteToLog("Writing to cache (CHUNK)");
 
                 writer.Write(chunkList.Count);
-                for (int i = 0; i < chunkList.Count; i++)
+                int chunkIndex = 0;
+                foreach (ChunkAssetEntry chunk in chunkList.Values)
                 {
-                    ChunkAssetEntry chunk = chunkList.Values.ElementAt(i);
-
                     writer.Write(chunk.Id);
                     writer.Write(chunk.Sha1);
                     writer.Write(chunk.Size);
@@ -2411,9 +2615,22 @@ namespace FrostySdk.Managers
                         writer.Write(baseBundleId);
                     }
 
-                    WriteToLog(string.Format("progress:{0}", (double)i / (double)chunkList.Count * 100.0));
+                    WriteCacheProgress(chunkIndex++, chunkList.Count);
                 }
             }
+
+            File.Delete(cachePath);
+            File.Move(fi.FullName, cachePath);
+        }
+
+        private void WriteCacheProgress(int index, int count)
+        {
+            if (count == 0)
+                return;
+
+            int interval = Math.Max(1, count / 100);
+            if (index == 0 || index + 1 == count || index % interval == 0)
+                WriteToLog("progress:{0}", (index + 1) / (double)count * 100.0);
         }
 
         private void WriteToLog(string text, params object[] vars) => logger?.Log(text, vars);

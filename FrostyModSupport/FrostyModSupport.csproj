@@ -96,6 +96,7 @@
       <Project>{d1a29bf8-2e2e-47be-845f-a6dd66d175ba}</Project>
       <Name>FrostyHash</Name>
       <Private>False</Private>
+      <SkipGetTargetFrameworkProperties>true</SkipGetTargetFrameworkProperties>
     </ProjectReference>
     <ProjectReference Include="..\FrostyPlugin\FrostyCore.csproj">
       <Project>{d86d23d9-db93-4d4e-b383-5022f759aba8}</Project>

@@ -1,0 +1,128 @@
+name: Build
+
+on:
+  push:
+    branches:
+      - "**"
+  pull_request:
+    branches:
+      - "**"
+
+jobs:
+  windows:
+    name: Windows x64
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up MSBuild
+        uses: microsoft/setup-msbuild@v2
+        with:
+          msbuild-architecture: x64
+
+      - name: Set up NuGet
+        uses: NuGet/setup-nuget@v2
+
+      - name: Restore FrostyEditor
+        run: dotnet msbuild FrostyEditor\FrostyEditor.csproj /t:Restore /p:Configuration="Developer - Debug" /p:Platform=x64 /p:RuntimeIdentifier=win-x64
+
+      - name: Build FrostyEditor
+        run: msbuild FrostyEditor\FrostyEditor.csproj /p:Configuration="Developer - Debug" /p:Platform=x64 /p:RuntimeIdentifier=win-x64
+
+      - name: Restore FrostyCmd
+        run: dotnet msbuild FrostyCmd\FrostyCmd.csproj /t:Restore /p:Configuration="Developer - Debug" /p:Platform=x64 /p:RuntimeIdentifier=win-x64
+
+      - name: Build FrostyCmd
+        run: msbuild FrostyCmd\FrostyCmd.csproj /p:Configuration="Developer - Debug" /p:Platform=x64 /p:RuntimeIdentifier=win-x64
+
+      - name: Prepare plugin output folder
+        run: New-Item -ItemType Directory -Force FrostyEditor\bin\Developer\Debug\Plugins
+
+      - name: Restore CFB profile plugin
+        run: dotnet msbuild Plugins\CFBProfilePlugin\CFBProfilePlugin.csproj /t:Restore /p:Configuration="Developer - Debug" /p:Platform=x64 /p:RuntimeIdentifier=win-x64 /p:SolutionDir="$env:GITHUB_WORKSPACE\FrostyEditor\"
+
+      - name: Build CFB profile plugin
+        run: msbuild Plugins\CFBProfilePlugin\CFBProfilePlugin.csproj /p:Configuration="Developer - Debug" /p:Platform=x64 /p:RuntimeIdentifier=win-x64 /p:SolutionDir="$env:GITHUB_WORKSPACE\FrostyEditor\"
+
+      - name: Restore texture editor plugin
+        run: dotnet msbuild Plugins\TexturePlugin\TexturePlugin.csproj /t:Restore /p:Configuration="Developer - Debug" /p:Platform=x64 /p:RuntimeIdentifier=win-x64 /p:SolutionDir="$env:GITHUB_WORKSPACE\FrostyEditor\"
+
+      - name: Build texture editor plugin
+        run: msbuild Plugins\TexturePlugin\TexturePlugin.csproj /p:Configuration="Developer - Debug" /p:Platform=x64 /p:RuntimeIdentifier=win-x64 /p:SolutionDir="$env:GITHUB_WORKSPACE\FrostyEditor\"
+
+      - name: Restore mesh editor plugin
+        run: dotnet msbuild Plugins\MeshSetPlugin\MeshSetPlugin.csproj /t:Restore /p:Configuration="Developer - Debug" /p:Platform=x64 /p:RuntimeIdentifier=win-x64 /p:SolutionDir="$env:GITHUB_WORKSPACE\FrostyEditor\"
+
+      - name: Build mesh editor plugin
+        run: msbuild Plugins\MeshSetPlugin\MeshSetPlugin.csproj /p:Configuration="Developer - Debug" /p:Platform=x64 /p:RuntimeIdentifier=win-x64 /p:SolutionDir="$env:GITHUB_WORKSPACE\FrostyEditor\"
+
+      - name: Restore sound editor plugin
+        run: dotnet msbuild Plugins\SoundEditorPlugin\SoundEditorPlugin.csproj /t:Restore /p:Configuration="Developer - Debug" /p:Platform=x64 /p:RuntimeIdentifier=win-x64 /p:SolutionDir="$env:GITHUB_WORKSPACE\FrostyEditor\"
+
+      - name: Build sound editor plugin
+        run: msbuild Plugins\SoundEditorPlugin\SoundEditorPlugin.csproj /p:Configuration="Developer - Debug" /p:Platform=x64 /p:RuntimeIdentifier=win-x64 /p:SolutionDir="$env:GITHUB_WORKSPACE\FrostyEditor\"
+
+      - name: Package CFB editor plugins
+        shell: pwsh
+        run: |
+          $pluginDirectory = "FrostyEditor\bin\Developer\Debug\Plugins"
+          New-Item -ItemType Directory -Force $pluginDirectory | Out-Null
+
+          $plugins = @(
+            @{ Project = "CFBProfilePlugin"; File = "CFBProfilePlugin.dll" },
+            @{ Project = "TexturePlugin"; File = "TexturePlugin.dll" },
+            @{ Project = "MeshSetPlugin"; File = "MeshSetPlugin.dll" },
+            @{ Project = "SoundEditorPlugin"; File = "SoundEditorPlugin.dll" }
+          )
+
+          foreach ($item in $plugins) {
+            $plugin = Get-ChildItem "Plugins\$($item.Project)\bin" -Recurse -Filter $item.File |
+              Select-Object -First 1
+            if (-not $plugin) {
+              throw "$($item.File) was not produced."
+            }
+
+            Copy-Item -LiteralPath $plugin.FullName -Destination $pluginDirectory -Force
+            if (-not (Test-Path "$pluginDirectory\$($item.File)")) {
+              throw "$($item.File) was not packaged beside FrostyEditor.exe."
+            }
+          }
+
+      - name: Package vgmstream audio decoder
+        shell: pwsh
+        run: |
+          $version = "r2117"
+          $expectedHash = "6C4A8A3813864FEFED081BBD337DBC0AD93BF88E0B92F5DB98D7AB258B22DC6C"
+          $archive = Join-Path $env:RUNNER_TEMP "vgmstream-win64.zip"
+          $destination = "FrostyEditor\bin\Developer\Debug\ThirdParty\vgmstream"
+
+          Invoke-WebRequest `
+            -Uri "https://github.com/vgmstream/vgmstream/releases/download/$version/vgmstream-win64.zip" `
+            -OutFile $archive
+
+          $actualHash = (Get-FileHash $archive -Algorithm SHA256).Hash
+          if ($actualHash -ne $expectedHash) {
+            throw "vgmstream archive hash mismatch: $actualHash"
+          }
+
+          New-Item -ItemType Directory -Force $destination | Out-Null
+          Expand-Archive -LiteralPath $archive -DestinationPath $destination -Force
+          if (-not (Test-Path "$destination\vgmstream-cli.exe")) {
+            throw "vgmstream-cli.exe was not packaged."
+          }
+
+      - name: Upload editor artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: FrostyEditor-Developer-Debug-x64
+          path: FrostyEditor\bin\Developer\Debug\
+          if-no-files-found: error
+
+      - name: Upload command exporter artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: FrostyCmd-Developer-Debug-x64
+          path: FrostyEditor\bin\Developer\Debug\
+          if-no-files-found: error

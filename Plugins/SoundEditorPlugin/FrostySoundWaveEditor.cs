@@ -144,6 +144,8 @@ namespace SoundEditorPlugin
 
                 if (chunkEntry == null)
                 {
+                    track.Codec = "Missing chunk";
+                    track.Samples = new short[0];
                     App.Logger.LogWarning($"SoundChunk {soundDataChunk.ChunkId} doesn't exist. This could be because its a LocalizedChunk that is not loaded by your game.");
                 }
                 else
@@ -162,7 +164,7 @@ namespace SoundEditorPlugin
                             uint headerSize = reader.ReadUInt(Endian.Big) & 0x00ffffff;
                             byte codec = reader.ReadByte();
                             int channels = (reader.ReadByte() >> 2) + 1;
-                            ushort sampleRate = reader.ReadUShort(Endian.Big);
+                            int sampleRate = reader.ReadUShort(Endian.Big);
                             uint sampleCount = reader.ReadUInt(Endian.Big) & 0x00ffffff;
 
                             switch (codec)
@@ -349,6 +351,8 @@ namespace SoundEditorPlugin
 
                 if (chunkEntry == null)
                 {
+                    track.Codec = "Missing chunk";
+                    track.Samples = new short[0];
                     App.Logger.LogWarning($"SoundChunk {soundDataChunk.ChunkId} doesn't exist. This could be because its a LocalizedChunk that is not loaded by your game.");
                 }
                 else
@@ -361,7 +365,7 @@ namespace SoundEditorPlugin
                         uint headerSize = reader.ReadUInt(Endian.Big) & 0x00ffffff;
                         byte codec = reader.ReadByte();
                         int channels = (reader.ReadByte() >> 2) + 1;
-                        ushort sampleRate = reader.ReadUShort(Endian.Big);
+                        int sampleRate = reader.ReadUShort(Endian.Big);
                         uint sampleCount = reader.ReadUInt(Endian.Big) & 0x00ffffff;
 
                         switch (codec)
@@ -371,6 +375,7 @@ namespace SoundEditorPlugin
                             case 0x15: track.Codec = "EaLayer31"; break;
                             case 0x16: track.Codec = "EaLayer32Pcm"; break;
                             case 0x1c: track.Codec = "EaOpus"; break;
+                            case 0x1e: track.Codec = "EaOpus"; break;
                             default: track.Codec = "Unknown (" + codec.ToString("x2") + ")"; break;
                         }
 
@@ -390,7 +395,7 @@ namespace SoundEditorPlugin
                             decodedSoundBuf.AddRange(data);
                             duration += (data.Length / channels) / (double)sampleRate;
                         }
-                        else if (codec == 0x15 || codec == 0x16 || codec == 0x1c)
+                        else if (codec == 0x15 || codec == 0x16)
                         {
                             sampleCount = 0;
                             EALayer3.Decode(soundBuf, soundBuf.Length, (short[] data, int count, EALayer3.StreamInfo info) =>
@@ -401,6 +406,29 @@ namespace SoundEditorPlugin
                                 decodedSoundBuf.AddRange(data);
                             });
                             duration += (sampleCount / channels) / (double)sampleRate;
+                        }
+                        else
+                        {
+                            if (VgmstreamAudioDecoder.TryDecode(
+                                soundBuf,
+                                out short[] data,
+                                out int decodedSampleRate,
+                                out int decodedChannels,
+                                out string decodeError))
+                            {
+                                decodedSoundBuf.AddRange(data);
+                                sampleRate = decodedSampleRate;
+                                channels = decodedChannels;
+                                sampleCount = (uint)data.Length;
+                                duration += (data.Length / channels) / (double)sampleRate;
+                            }
+                            else
+                            {
+                                App.Logger.LogWarning(
+                                    "Unable to decode {0}: {1}",
+                                    soundDataChunk.ChunkId,
+                                    decodeError);
+                            }
                         }
 
                         track.SampleRate = sampleRate;

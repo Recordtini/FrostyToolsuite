@@ -1165,7 +1165,14 @@ namespace FrostySdk
                     foreach (Type subType in existingAssembly.GetExportedTypes())
                     {
                         foreach (TypeInfoGuidAttribute guidAttr in subType.GetCustomAttributes<TypeInfoGuidAttribute>())
-                            guidTypeMapping.Add(guidAttr.Guid, subType);
+                        {
+                            if (!guidTypeMapping.ContainsKey(guidAttr.Guid))
+                                guidTypeMapping.Add(guidAttr.Guid, subType);
+                        }
+
+                        GuidAttribute classGuid = subType.GetCustomAttribute<GuidAttribute>();
+                        if (classGuid != null && !guidTypeMapping.ContainsKey(classGuid.Guid))
+                            guidTypeMapping.Add(classGuid.Guid, subType);
                     }
                 }
                 if (guidTypeMapping.ContainsKey(guid))

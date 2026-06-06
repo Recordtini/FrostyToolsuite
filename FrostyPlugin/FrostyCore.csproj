@@ -284,6 +284,7 @@
       <Project>{d1a29bf8-2e2e-47be-845f-a6dd66d175ba}</Project>
       <Name>FrostyHash</Name>
       <Private>False</Private>
+      <SkipGetTargetFrameworkProperties>true</SkipGetTargetFrameworkProperties>
     </ProjectReference>
     <ProjectReference Include="..\FrostySdk\FrostySdk.csproj">
       <Project>{93fb4a0c-df89-4169-80b5-c4e2277ff7a0}</Project>

@@ -536,11 +536,26 @@ namespace FrostySdk.IO
 
         public static EbxReader CreateReader(Stream inStream, FileSystem fs = null, bool patched = false)
         {
+            if (RiffEbxReader.IsRiffEbx(inStream))
+                return new RiffEbxReader(inStream);
+
             return (ProfilesLibrary.EbxVersion & 1) != 0 ? new EbxReaderV2(inStream, fs, patched) : new EbxReader(inStream);
         }
 
         public Guid FileGuid => fileGuid;
-        public virtual string RootType => classTypes[instances[0].ClassRef].Name;
+        public virtual string RootType
+        {
+            get
+            {
+                if (!isValid || instances.Count == 0)
+                    return "";
+
+                int classRef = instances[0].ClassRef;
+                return classRef >= 0 && classRef < classTypes.Count
+                    ? classTypes[classRef].Name
+                    : "";
+            }
+        }
         public List<Guid> Dependencies => dependencies;
         public bool IsValid => isValid;
 
@@ -1268,7 +1283,14 @@ namespace FrostySdk.IO
         { 
             get
             {
-                Type type = TypeLibrary.GetType(classGuids[instances[0].ClassRef]);
+                if (!isValid || instances.Count == 0)
+                    return "";
+
+                int classRef = instances[0].ClassRef;
+                if (classRef < 0 || classRef >= classGuids.Count)
+                    return "";
+
+                Type type = TypeLibrary.GetType(classGuids[classRef]);
                 return type != null ? type.Name : "";
             }
         }

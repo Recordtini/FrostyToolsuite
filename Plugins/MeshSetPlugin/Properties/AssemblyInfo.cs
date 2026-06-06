@@ -33,6 +33,7 @@ using FrostySdk.Managers;
 [assembly: PluginVersion("1.0.1.0")]
 
 [assembly: RegisterOptionsExtension(typeof(MeshOptions))]
+[assembly: RegisterAssetDefinition("MeshAsset", typeof(MeshAssetDefinition))]
 [assembly: RegisterAssetDefinition("RigidMeshAsset", typeof(RigidMeshAssetDefinition))]
 [assembly: RegisterAssetDefinition("SkinnedMeshAsset", typeof(SkinnedMeshAssetDefinition))]
 [assembly: RegisterAssetDefinition("CompositeMeshAsset", typeof(CompositeMeshAssetDefinition))]

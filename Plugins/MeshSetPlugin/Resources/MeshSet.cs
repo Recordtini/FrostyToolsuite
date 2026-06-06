@@ -458,6 +458,100 @@ namespace MeshSetPlugin.Resources
         {
         }
 
+        internal MeshSetSection(NativeReader reader, int index, bool cfb27)
+        {
+            long sectionStart = reader.Position;
+            m_sectionIndex = index;
+            m_offset1 = reader.ReadLong();
+            long materialNamePointer = reader.ReadLong();
+            long boneListPointer = reader.ReadLong();
+            ushort boneCount = reader.ReadUShort();
+            BonesPerVertex = (byte)reader.ReadUShort();
+            m_materialId = reader.ReadUShort();
+            m_vertexStride = reader.ReadByte();
+            m_primitiveType = (PrimitiveType)reader.ReadByte();
+            m_primitiveCount = reader.ReadUInt();
+            m_startIndex = reader.ReadUInt();
+            m_vertexOffset = reader.ReadUInt();
+            m_vertexCount = reader.ReadUInt();
+
+            reader.Position += 28;
+            for (int i = 0; i < 6; i++)
+                m_texCoordRatios.Add(reader.ReadFloat());
+
+            for (int declarationIndex = 0; declarationIndex < m_geometryDeclarationDesc.Length;
+                declarationIndex++)
+            {
+                GeometryDeclarationDesc declaration = new GeometryDeclarationDesc();
+                declaration.Elements =
+                    new GeometryDeclarationDesc.Element[GeometryDeclarationDesc.MaxElements];
+                declaration.Streams =
+                    new GeometryDeclarationDesc.Stream[GeometryDeclarationDesc.MaxStreams];
+
+                for (int elementIndex = 0;
+                    elementIndex < GeometryDeclarationDesc.MaxElements;
+                    elementIndex++)
+                {
+                    declaration.Elements[elementIndex] = new GeometryDeclarationDesc.Element
+                    {
+                        Usage = (VertexElementUsage)reader.ReadByte(),
+                        Format = (VertexElementFormat)reader.ReadByte(),
+                        Offset = reader.ReadByte(),
+                        StreamIndex = reader.ReadByte()
+                    };
+                }
+                for (int streamIndex = 0;
+                    streamIndex < GeometryDeclarationDesc.MaxStreams;
+                    streamIndex++)
+                {
+                    declaration.Streams[streamIndex] = new GeometryDeclarationDesc.Stream
+                    {
+                        VertexStride = reader.ReadByte(),
+                        Classification = (VertexElementClassification)reader.ReadByte()
+                    };
+                }
+
+                declaration.ElementCount = reader.ReadByte();
+                declaration.StreamCount = reader.ReadByte();
+                reader.Position += 2;
+                m_geometryDeclarationDesc[declarationIndex] = declaration;
+            }
+
+            m_unknownData = reader.ReadBytes(68);
+            long nextSection = reader.Position;
+
+            long boneListOffset = ResolveCfbPointer(boneListPointer);
+            if (boneCount > 0 && IsReadableRange(reader, boneListOffset, boneCount * 2L))
+            {
+                reader.Position = boneListOffset;
+                for (int i = 0; i < boneCount; i++)
+                    m_boneList.Add(reader.ReadUShort());
+            }
+
+            long materialNameOffset = ResolveCfbPointer(materialNamePointer);
+            if (IsReadableRange(reader, materialNameOffset, 1))
+            {
+                reader.Position = materialNameOffset;
+                m_materialName = reader.ReadNullTerminatedString();
+            }
+            else
+            {
+                m_materialName = "material_" + index;
+            }
+
+            reader.Position = nextSection;
+        }
+
+        private static long ResolveCfbPointer(long pointer)
+        {
+            return pointer == 0 ? -1 : pointer + 16;
+        }
+
+        private static bool IsReadableRange(NativeReader reader, long offset, long size)
+        {
+            return offset >= 0 && size >= 0 && offset <= reader.Length - size;
+        }
+
         public MeshSetSection(NativeReader reader, AssetManager am, int index)
         {
             m_sectionIndex = index;
@@ -983,6 +1077,101 @@ namespace MeshSetPlugin.Resources
         private uint m_inlineDataOffset;
         private byte[] m_adjacencyData;
         private bool m_hasBoneShortNames;
+
+        internal MeshSetLod(NativeReader reader, AssetManager am, ref int sectionIndex, bool cfb27)
+        {
+            long lodStart = reader.Position;
+            reader.Position = lodStart + 16;
+
+            m_meshType = (MeshType)reader.ReadUInt();
+            m_maxInstances = reader.ReadUInt();
+            m_sectionCount = reader.ReadInt();
+            long sectionOffset = ResolveCfbPointer(reader.ReadLong());
+
+            for (int i = 0; i < MaxCategories; i++)
+            {
+                int count = reader.ReadInt();
+                long categoryOffset = ResolveCfbPointer(reader.ReadLong());
+                List<byte> category = new List<byte>();
+                long returnPosition = reader.Position;
+                if (count > 0 && IsReadableRange(reader, categoryOffset, count))
+                {
+                    reader.Position = categoryOffset;
+                    for (int j = 0; j < count; j++)
+                        category.Add(reader.ReadByte());
+                }
+                m_subsetCategories.Add(category);
+                reader.Position = returnPosition;
+            }
+
+            m_flags = (MeshLayoutFlags)reader.ReadUInt();
+            m_indexBufferFormat.format = reader.ReadInt();
+            m_indexBufferSize = reader.ReadUInt();
+            m_vertexBufferSize = reader.ReadUInt();
+            reader.Position += 16;
+
+            m_chunkId = reader.ReadGuid();
+            m_inlineDataOffset = reader.ReadUInt();
+            reader.ReadInt();
+
+            long shaderDebugOffset = ResolveCfbPointer(reader.ReadLong());
+            long nameOffset = ResolveCfbPointer(reader.ReadLong());
+            long shortNameOffset = ResolveCfbPointer(reader.ReadLong());
+            m_nameHash = reader.ReadUInt();
+            reader.ReadLong();
+
+            uint boneCount = 0;
+            long boneOffset = 0;
+            if (m_meshType == MeshType.MeshType_Skinned)
+            {
+                boneCount = reader.ReadUInt();
+                boneOffset = ResolveCfbPointer(reader.ReadLong());
+            }
+
+            reader.Pad(16);
+            long returnPositionAfterHeader = reader.Position;
+
+            if (boneCount > 0 && IsReadableRange(reader, boneOffset, boneCount * 4L))
+            {
+                reader.Position = boneOffset;
+                for (int i = 0; i < boneCount; i++)
+                    m_boneIndexArray.Add(reader.ReadUInt());
+            }
+
+            const int CfbSectionSize = 368;
+            if (m_sectionCount > 0
+                && IsReadableRange(reader, sectionOffset, m_sectionCount * (long)CfbSectionSize))
+            {
+                reader.Position = sectionOffset;
+                for (int i = 0; i < m_sectionCount; i++)
+                    m_sections.Add(new MeshSetSection(reader, sectionIndex++, true));
+            }
+
+            m_shaderDebugName = ReadCfbString(reader, shaderDebugOffset);
+            m_name = ReadCfbString(reader, nameOffset);
+            m_shortName = ReadCfbString(reader, shortNameOffset);
+            m_hasBoneShortNames = m_boneShortNameArray.Count > 0;
+            reader.Position = returnPositionAfterHeader;
+        }
+
+        private static string ReadCfbString(NativeReader reader, long offset)
+        {
+            if (!IsReadableRange(reader, offset, 1))
+                return "";
+
+            reader.Position = offset;
+            return reader.ReadNullTerminatedString();
+        }
+
+        private static long ResolveCfbPointer(long pointer)
+        {
+            return pointer == 0 ? -1 : pointer + 16;
+        }
+
+        private static bool IsReadableRange(NativeReader reader, long offset, long size)
+        {
+            return offset >= 0 && size >= 0 && offset <= reader.Length - size;
+        }
 
         public MeshSetLod(NativeReader reader, AssetManager am, ref int sectionIndex)
         {
@@ -1625,6 +1814,13 @@ namespace MeshSetPlugin.Resources
         public override void Read(NativeReader reader, AssetManager am, ResAssetEntry entry, ModifiedResource modifiedData)
         {
             base.Read(reader, am, entry, modifiedData);
+            if (ProfilesLibrary.ProfileName == "CollegeFB27"
+                || ProfilesLibrary.ProfileName == "CollegeFB27_Trial")
+            {
+                ReadCfb27(reader, am, entry);
+                return;
+            }
+
             m_boundingBox = reader.ReadAxisAlignedBox();
 
             List<long> lodOffsets = new List<long>();
@@ -1896,6 +2092,93 @@ namespace MeshSetPlugin.Resources
 
                 return writer.ToByteArray();
             }
+        }
+
+        private void ReadCfb27(NativeReader reader, AssetManager am, ResAssetEntry entry)
+        {
+            const int CfbResourceHeaderSize = 16;
+            reader.Position = 0;
+            reader.Position = CfbResourceHeaderSize;
+
+            m_boundingBox = reader.ReadAxisAlignedBox();
+
+            List<long> lodOffsets = new List<long>();
+            for (int i = 0; i < MaxLodCount; i++)
+                lodOffsets.Add(reader.ReadLong());
+
+            reader.ReadLong();
+            reader.ReadLong();
+            reader.ReadLong();
+            m_nameHash = reader.ReadUInt();
+            m_meshType = (MeshType)reader.ReadByte();
+            reader.Position += 11;
+
+            for (int i = 0; i < MaxLodCount * 2; i++)
+                m_lodFadeDistanceFactors[i] = reader.ReadUShort();
+
+            m_flags = (MeshSetLayoutFlags)reader.ReadULong();
+            m_shaderDrawOrder = reader.ReadByte();
+            m_shaderDrawOrderUserSlot = reader.ReadByte();
+            m_shaderDrawOrderSubOrder = reader.ReadShort();
+            m_unknownUShort = reader.ReadUShort();
+            ushort lodCount = reader.ReadUShort();
+
+            if (m_meshType == MeshType.MeshType_Skinned)
+            {
+                reader.ReadUInt();
+                reader.ReadUShort();
+                reader.Position += 8;
+                m_boneCount = reader.ReadUShort();
+                m_bonePartCount = reader.ReadUShort();
+                reader.ReadUShort();
+
+                if (m_bonePartCount > 0)
+                {
+                    long boneIndicesOffset = ResolveCfbPointer(reader.ReadLong());
+                    long boneBoundingBoxesOffset = ResolveCfbPointer(reader.ReadLong());
+                    long returnPosition = reader.Position;
+
+                    if (IsReadableRange(reader, boneIndicesOffset, m_bonePartCount * 2L))
+                    {
+                        reader.Position = boneIndicesOffset;
+                        for (int i = 0; i < m_bonePartCount; i++)
+                            m_boneIndices.Add(reader.ReadUShort());
+                    }
+                    if (IsReadableRange(reader, boneBoundingBoxesOffset, m_bonePartCount * 32L))
+                    {
+                        reader.Position = boneBoundingBoxesOffset;
+                        for (int i = 0; i < m_bonePartCount; i++)
+                            m_boneBoundingBoxes.Add(reader.ReadAxisAlignedBox());
+                    }
+                    reader.Position = returnPosition;
+                }
+            }
+
+            int sectionIndex = 0;
+            for (int i = 0; i < lodCount && i < lodOffsets.Count; i++)
+            {
+                if (lodOffsets[i] == 0)
+                    continue;
+
+                reader.Position = lodOffsets[i];
+                MeshSetLod lod = new MeshSetLod(reader, am, ref sectionIndex, true);
+                lod.SetParts(m_partTransforms, m_partBoundingBoxes);
+                m_lods.Add(lod);
+            }
+
+            m_fullname = entry.Name;
+            int slash = m_fullname.LastIndexOf('/');
+            m_name = slash >= 0 ? m_fullname.Substring(slash + 1) : m_fullname;
+        }
+
+        private static long ResolveCfbPointer(long pointer)
+        {
+            return pointer == 0 ? -1 : pointer + 16;
+        }
+
+        private static bool IsReadableRange(NativeReader reader, long offset, long size)
+        {
+            return offset >= 0 && size >= 0 && offset <= reader.Length - size;
         }
 
         private void PreProcess(MeshContainer meshContainer)

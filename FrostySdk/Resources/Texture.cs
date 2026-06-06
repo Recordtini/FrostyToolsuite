@@ -2,6 +2,7 @@
 using FrostySdk.Managers;
 using System;
 using System.IO;
+using System.Text;
 
 namespace FrostySdk.Resources
 {
@@ -92,6 +93,7 @@ namespace FrostySdk.Resources
         private uint unknown1;
         private ushort sliceCount;
         private Guid chunkId;
+        private byte[] cfb27Tail = new byte[0];
 
         /*
            private uint[] mipOffsets = new uint[2];
@@ -126,6 +128,13 @@ namespace FrostySdk.Resources
         public override void Read(NativeReader reader, AssetManager am, ResAssetEntry entry, ModifiedResource modifiedData)
         {
             base.Read(reader, am, entry, modifiedData);
+
+            if (ProfilesLibrary.ProfileName == "CollegeFB27"
+                || ProfilesLibrary.ProfileName == "CollegeFB27_Trial")
+            {
+                ReadCfb27(reader, am);
+                return;
+            }
 
             if (ProfilesLibrary.DataVersion == (int)ProfileVersion.NeedForSpeedRivals)
             {
@@ -186,10 +195,77 @@ namespace FrostySdk.Resources
             Data = am.GetChunk(am.GetChunkEntry(chunkId));
         }
 
+        private void ReadCfb27(NativeReader reader, AssetManager am)
+        {
+            mipOffsets[0] = reader.ReadUInt();
+            mipOffsets[1] = reader.ReadUInt();
+            Type = (TextureType)reader.ReadUInt();
+            pixelFormat = reader.ReadInt();
+            unknown1 = reader.ReadUInt();
+            Flags = (TextureFlags)reader.ReadUShort();
+            Width = reader.ReadUShort();
+            Height = reader.ReadUShort();
+            Depth = reader.ReadUShort();
+            sliceCount = reader.ReadUShort();
+            MipCount = reader.ReadByte();
+            FirstMip = reader.ReadByte();
+
+            Unknown3[0] = reader.ReadUInt();
+            Unknown3[1] = reader.ReadUInt();
+            chunkId = reader.ReadGuid();
+            for (int i = 0; i < MipSizes.Length; i++)
+                MipSizes[i] = reader.ReadUInt();
+            ChunkSize = reader.ReadUInt();
+
+            int tailLength = (int)(reader.Length - reader.Position);
+            cfb27Tail = tailLength > 0 ? reader.ReadBytes(tailLength) : new byte[0];
+            if (cfb27Tail.Length >= 4)
+                AssetNameHash = BitConverter.ToUInt32(cfb27Tail, 0);
+            if (cfb27Tail.Length > 8)
+            {
+                int stringLength = Array.IndexOf(cfb27Tail, (byte)0, 8);
+                if (stringLength < 0)
+                    stringLength = cfb27Tail.Length;
+                TextureGroup = Encoding.UTF8.GetString(cfb27Tail, 8, stringLength - 8);
+            }
+            else
+            {
+                TextureGroup = "";
+            }
+
+            ChunkAssetEntry chunkEntry = am.GetChunkEntry(chunkId);
+            Data = chunkEntry != null ? am.GetChunk(chunkEntry) : null;
+        }
+
         public override byte[] SaveBytes()
         {
             using (NativeWriter writer = new NativeWriter(new MemoryStream()))
             {
+                if (ProfilesLibrary.ProfileName == "CollegeFB27"
+                    || ProfilesLibrary.ProfileName == "CollegeFB27_Trial")
+                {
+                    writer.Write(mipOffsets[0]);
+                    writer.Write(mipOffsets[1]);
+                    writer.Write((uint)Type);
+                    writer.Write(pixelFormat);
+                    writer.Write(unknown1);
+                    writer.Write((ushort)Flags);
+                    writer.Write(Width);
+                    writer.Write(Height);
+                    writer.Write(Depth);
+                    writer.Write(sliceCount);
+                    writer.Write(MipCount);
+                    writer.Write(FirstMip);
+                    writer.Write(Unknown3[0]);
+                    writer.Write(Unknown3[1]);
+                    writer.Write(chunkId);
+                    for (int i = 0; i < MipSizes.Length; i++)
+                        writer.Write(MipSizes[i]);
+                    writer.Write(ChunkSize);
+                    writer.Write(cfb27Tail);
+                    return writer.ToByteArray();
+                }
+
                 if (ProfilesLibrary.DataVersion == (int)ProfileVersion.NeedForSpeedRivals)
                 {
                     writer.Write(Unknown3[0]);
@@ -337,7 +413,7 @@ namespace FrostySdk.Resources
         {
             if (disposing)
             {
-                Data.Dispose();
+                Data?.Dispose();
             }
         }
 
