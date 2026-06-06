@@ -6,6 +6,7 @@
     <AssemblyTitle>CFBProfilePlugin</AssemblyTitle>
     <Product>CFBProfilePlugin</Product>
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <AppendRuntimeIdentifierToOutputPath>false</AppendRuntimeIdentifierToOutputPath>
     <OutputType>Library</OutputType>
   </PropertyGroup>
 

@@ -46,6 +46,23 @@ jobs:
       - name: Build CFB profile plugin
         run: msbuild Plugins\CFBProfilePlugin\CFBProfilePlugin.csproj /p:Configuration="Developer - Debug" /p:Platform=x64 /p:RuntimeIdentifier=win-x64 /p:SolutionDir="$env:GITHUB_WORKSPACE\FrostyEditor\"
 
+      - name: Package CFB profile plugin
+        shell: pwsh
+        run: |
+          $plugin = Get-ChildItem Plugins\CFBProfilePlugin\bin -Recurse -Filter CFBProfilePlugin.dll |
+            Select-Object -First 1
+          if (-not $plugin) {
+            throw "CFBProfilePlugin.dll was not produced."
+          }
+
+          $pluginDirectory = "FrostyEditor\bin\Developer\Debug\Plugins"
+          New-Item -ItemType Directory -Force $pluginDirectory | Out-Null
+          Copy-Item -LiteralPath $plugin.FullName -Destination $pluginDirectory -Force
+
+          if (-not (Test-Path "$pluginDirectory\CFBProfilePlugin.dll")) {
+            throw "CFBProfilePlugin.dll was not packaged beside FrostyEditor.exe."
+          }
+
       - name: Upload editor artifact
         uses: actions/upload-artifact@v4
         with:
