@@ -315,7 +315,7 @@ namespace FrostySdk.IO
                     continue;
 
                 Position = payloadOffset + offset;
-                refs.Add(new ResourceRef(ReadULong()));
+                refs.Add(new ResourceRef(ReadCfbResourceRef()));
             }
 
             if (obj is RiffEbxAsset rawAsset)
@@ -489,11 +489,17 @@ namespace FrostySdk.IO
                 return new PointerRef();
             }
             if (elementType == typeof(ResourceRef))
-                return new ResourceRef(ReadULong());
+                return new ResourceRef(ReadCfbResourceRef());
+            if (elementType == typeof(Guid))
+                return ReadGuid();
             if (elementType == typeof(int))
                 return ReadInt();
             if (elementType == typeof(uint))
                 return ReadUInt();
+            if (elementType == typeof(long))
+                return ReadLong();
+            if (elementType == typeof(ulong))
+                return ReadULong();
             if (elementType == typeof(short))
                 return ReadShort();
             if (elementType == typeof(ushort))
@@ -504,6 +510,34 @@ namespace FrostySdk.IO
                 return ReadByte();
             if (elementType == typeof(bool))
                 return ReadByte() != 0;
+            if (elementType.IsEnum)
+                return Enum.ToObject(elementType, ReadInt());
+
+            EbxClassMetaAttribute classMeta = elementType.GetCustomAttribute<EbxClassMetaAttribute>();
+            if (classMeta != null && classMeta.Size > 0)
+            {
+                long structStart = Position;
+                object value = TypeLibrary.CreateObject(elementType);
+                foreach (PropertyInfo property in elementType.GetProperties())
+                {
+                    EbxFieldMetaAttribute fieldMeta = property.GetCustomAttribute<EbxFieldMetaAttribute>();
+                    if (fieldMeta == null || !property.CanWrite
+                        || property.GetCustomAttribute<IsTransientAttribute>() != null
+                        || fieldMeta.Offset >= classMeta.Size)
+                        continue;
+
+                    Position = structStart + fieldMeta.Offset;
+                    object fieldValue = ReadArrayValue(
+                        property.PropertyType,
+                        elementOffset + fieldMeta.Offset,
+                        objectsByOffset);
+                    if (fieldValue != null)
+                        property.SetValue(value, fieldValue);
+                }
+
+                Position = structStart + classMeta.Size;
+                return value;
+            }
             return null;
         }
 
@@ -511,6 +545,27 @@ namespace FrostySdk.IO
         {
             EbxFieldMetaAttribute attribute = property.GetCustomAttribute<EbxFieldMetaAttribute>();
             return attribute?.Offset ?? uint.MaxValue;
+        }
+
+        private static ulong ReverseBytes(ulong value)
+        {
+            return ((value & 0x00000000000000FFUL) << 56)
+                | ((value & 0x000000000000FF00UL) << 40)
+                | ((value & 0x0000000000FF0000UL) << 24)
+                | ((value & 0x00000000FF000000UL) << 8)
+                | ((value & 0x000000FF00000000UL) >> 8)
+                | ((value & 0x0000FF0000000000UL) >> 24)
+                | ((value & 0x00FF000000000000UL) >> 40)
+                | ((value & 0xFF00000000000000UL) >> 56);
+        }
+
+        private ulong ReadCfbResourceRef()
+        {
+            ulong value = ReadULong();
+            return ProfilesLibrary.ProfileName == "CollegeFB27"
+                || ProfilesLibrary.ProfileName == "CollegeFB27_Trial"
+                ? ReverseBytes(value)
+                : value;
         }
     }
 }

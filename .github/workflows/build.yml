@@ -58,6 +58,12 @@ jobs:
       - name: Build mesh editor plugin
         run: msbuild Plugins\MeshSetPlugin\MeshSetPlugin.csproj /p:Configuration="Developer - Debug" /p:Platform=x64 /p:RuntimeIdentifier=win-x64 /p:SolutionDir="$env:GITHUB_WORKSPACE\FrostyEditor\"
 
+      - name: Restore sound editor plugin
+        run: dotnet msbuild Plugins\SoundEditorPlugin\SoundEditorPlugin.csproj /t:Restore /p:Configuration="Developer - Debug" /p:Platform=x64 /p:RuntimeIdentifier=win-x64 /p:SolutionDir="$env:GITHUB_WORKSPACE\FrostyEditor\"
+
+      - name: Build sound editor plugin
+        run: msbuild Plugins\SoundEditorPlugin\SoundEditorPlugin.csproj /p:Configuration="Developer - Debug" /p:Platform=x64 /p:RuntimeIdentifier=win-x64 /p:SolutionDir="$env:GITHUB_WORKSPACE\FrostyEditor\"
+
       - name: Package CFB editor plugins
         shell: pwsh
         run: |
@@ -67,7 +73,8 @@ jobs:
           $plugins = @(
             @{ Project = "CFBProfilePlugin"; File = "CFBProfilePlugin.dll" },
             @{ Project = "TexturePlugin"; File = "TexturePlugin.dll" },
-            @{ Project = "MeshSetPlugin"; File = "MeshSetPlugin.dll" }
+            @{ Project = "MeshSetPlugin"; File = "MeshSetPlugin.dll" },
+            @{ Project = "SoundEditorPlugin"; File = "SoundEditorPlugin.dll" }
           )
 
           foreach ($item in $plugins) {

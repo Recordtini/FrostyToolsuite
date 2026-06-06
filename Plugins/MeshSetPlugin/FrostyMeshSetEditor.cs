@@ -3762,8 +3762,22 @@ namespace MeshSetPlugin
             {
                 ulong resRid = ((dynamic)RootObject).MeshSetResource;
                 ResAssetEntry rEntry = App.AssetManager.GetResEntry(resRid);
+                if (rEntry == null)
+                {
+                    FrostyMessageBox.Show(
+                        $"Unable to locate MeshSet resource {resRid:X16} for '{AssetEntry.Name}'.",
+                        "MeshSet Editor");
+                    return;
+                }
 
                 meshSet = App.AssetManager.GetResAs<MeshSet>(rEntry);
+                if (meshSet == null)
+                {
+                    FrostyMessageBox.Show(
+                        $"Unable to read MeshSet resource {resRid:X16} for '{AssetEntry.Name}'.",
+                        "MeshSet Editor");
+                    return;
+                }
                 /*if (meshSet.Lods[0].SectionCount == 2)
                 {
                     ResAssetEntry meshset = App.AssetManager.GetResEntry(

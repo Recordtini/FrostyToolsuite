@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
 using FrostySdk;
+using FrostySdk.Ebx;
 using FrostySdk.Interfaces;
 using FrostySdk.IO;
 using FrostySdk.Managers;
@@ -194,8 +195,14 @@ namespace FrostyCmd
                 InspectEbx(args);
                 return;
             }
+            if (command == "inspect-asset")
+            {
+                InspectAsset(args);
+                return;
+            }
             Console.WriteLine("Unknown command.");
             Console.WriteLine("Usage: FrostyCmd inspect-ebx <file> [--profile CollegeFB27]");
+            Console.WriteLine("       FrostyCmd inspect-asset <game exe or game dir> <asset name> [--profile CollegeFB27]");
             Console.WriteLine("       FrostyCmd export <game exe or game dir> <output dir> [--profile CollegeFB27] [--types ebx,res,chunk] [--filter text] [--limit count]");
 
             //string basePath = args[0];
@@ -294,9 +301,165 @@ namespace FrostyCmd
                     }
 
                     if (value is System.Collections.ICollection collection)
+                    {
                         Console.WriteLine(property.Name + ".Count: " + collection.Count);
+                        int itemIndex = 0;
+                        foreach (object item in collection)
+                        {
+                            if (itemIndex >= 8)
+                                break;
+
+                            Console.WriteLine("  [" + itemIndex + "] " + FormatObject(item));
+                            itemIndex++;
+                        }
+                    }
                     else
                         Console.WriteLine(property.Name + ": " + (value ?? "(null)"));
+                }
+            }
+        }
+
+        private static string FormatObject(object value)
+        {
+            if (value == null)
+                return "(null)";
+
+            List<string> fields = new List<string>();
+            foreach (PropertyInfo property in value.GetType().GetProperties())
+            {
+                if (!property.CanRead || property.GetIndexParameters().Length != 0)
+                    continue;
+
+                object propertyValue;
+                try
+                {
+                    propertyValue = property.GetValue(value);
+                }
+                catch
+                {
+                    continue;
+                }
+                fields.Add(property.Name + "=" + (propertyValue ?? "(null)"));
+            }
+
+            return fields.Count == 0 ? value.ToString() : string.Join(", ", fields);
+        }
+
+        private static void InspectAsset(string[] args)
+        {
+            if (args.Length < 3)
+            {
+                Console.WriteLine("Usage: FrostyCmd inspect-asset <game exe or game dir> <asset name> [--profile CollegeFB27]");
+                return;
+            }
+
+            string profile = "CollegeFB27";
+            for (int i = 3; i < args.Length; i++)
+            {
+                if (args[i].Equals("--profile", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
+                    profile = args[++i];
+            }
+
+            FileInfo gameFile = ResolveGameFile(args[1]);
+            if (gameFile == null)
+                return;
+
+            AssetManager assetManager = LoadAssetManager(gameFile, profile);
+            string assetName = args[2].Replace('\\', '/');
+
+            EbxAssetEntry ebxEntry = assetManager.GetEbxEntry(assetName);
+            if (ebxEntry == null)
+            {
+                Console.WriteLine("EBX not found: " + assetName);
+                return;
+            }
+
+            assetManager.ResolveEbxMetadata(ebxEntry);
+            Console.WriteLine("EBX: " + ebxEntry.Name);
+            Console.WriteLine("Type: " + ebxEntry.Type);
+            Console.WriteLine("File GUID: " + ebxEntry.Guid);
+
+            EbxAsset asset = assetManager.GetEbx(ebxEntry);
+            if (asset?.RootObject != null)
+            {
+                foreach (PropertyInfo property in asset.RootObject.GetType().GetProperties())
+                {
+                    if (!property.CanRead)
+                        continue;
+
+                    object propertyValue = property.GetValue(asset.RootObject);
+                    if (property.PropertyType == typeof(ResourceRef))
+                    {
+                        Console.WriteLine(property.Name + ": " + propertyValue);
+                    }
+                    else if (propertyValue is System.Collections.ICollection collection)
+                    {
+                        Console.WriteLine(property.Name + ".Count: " + collection.Count);
+                        foreach (object item in collection)
+                        {
+                            PropertyInfo chunkIdProperty = item?.GetType().GetProperty("ChunkId");
+                            if (chunkIdProperty == null)
+                                continue;
+
+                            Guid chunkId = (Guid)chunkIdProperty.GetValue(item);
+                            Console.WriteLine("  Chunk " + chunkId + ": "
+                                + (assetManager.GetChunkEntry(chunkId) != null ? "indexed" : "missing"));
+                        }
+                    }
+                }
+            }
+
+            ResAssetEntry namedResource = assetManager.GetResEntry(assetName);
+            if (namedResource == null)
+            {
+                Console.WriteLine("Same-name RES: not found");
+                return;
+            }
+
+            Console.WriteLine("Same-name RES RID: " + namedResource.ResRid.ToString("X16"));
+            Console.WriteLine("Same-name RES type: 0x" + namedResource.ResType.ToString("X8"));
+            Console.WriteLine("Same-name RES size: " + namedResource.Size);
+
+            if (namedResource.ResType == (uint)ResourceType.Texture)
+            {
+                FrostySdk.Resources.Texture texture = assetManager.GetResAs<FrostySdk.Resources.Texture>(namedResource);
+                Console.WriteLine(texture == null
+                    ? "Texture payload: unreadable"
+                    : $"Texture payload: {texture.Width}x{texture.Height}, {texture.PixelFormat}");
+            }
+            else if (namedResource.ResType == (uint)ResourceType.MeshSet)
+            {
+                string pluginPath = Path.Combine(
+                    AppDomain.CurrentDomain.BaseDirectory,
+                    "Plugins",
+                    "MeshSetPlugin.dll");
+                if (File.Exists(pluginPath))
+                {
+                    Type meshSetType = Assembly.LoadFrom(pluginPath).GetType("MeshSetPlugin.Resources.MeshSet");
+                    MethodInfo getResAs = typeof(AssetManager).GetMethods()
+                        .First(method => method.Name == "GetResAs"
+                            && method.IsGenericMethodDefinition
+                            && method.GetParameters().Length == 2)
+                        .MakeGenericMethod(meshSetType);
+                    object meshSet = getResAs.Invoke(assetManager, new object[] { namedResource, null });
+                    PropertyInfo lodsProperty = meshSetType.GetProperty("Lods");
+                    System.Collections.ICollection lods =
+                        lodsProperty?.GetValue(meshSet) as System.Collections.ICollection;
+                    int lodCount = lods?.Count ?? 0;
+                    Console.WriteLine("MeshSet payload LODs: " + lodCount);
+                    if (lods != null)
+                    {
+                        foreach (object lod in lods)
+                        {
+                            Guid chunkId = (Guid)lod.GetType().GetProperty("ChunkId").GetValue(lod);
+                            System.Collections.ICollection sections =
+                                lod.GetType().GetProperty("Sections").GetValue(lod)
+                                as System.Collections.ICollection;
+                            Console.WriteLine("  LOD chunk " + chunkId + ": "
+                                + (assetManager.GetChunkEntry(chunkId) != null ? "indexed" : "missing")
+                                + ", sections=" + (sections?.Count ?? 0));
+                        }
+                    }
                 }
             }
         }
@@ -329,48 +492,15 @@ namespace FrostyCmd
                     int.TryParse(args[++i], out limit);
             }
 
-            FileInfo gameFile;
-            if (Directory.Exists(gameArg))
-            {
-                string exe = Path.Combine(gameArg, "CollegeFB27.exe");
-                if (!File.Exists(exe))
-                    exe = Directory.EnumerateFiles(gameArg, "*.exe").FirstOrDefault();
-                gameFile = new FileInfo(exe ?? gameArg);
-            }
-            else
-            {
-                gameFile = new FileInfo(gameArg);
-            }
-
-            if (!gameFile.Exists)
-            {
-                Console.WriteLine("Could not find game executable: " + gameArg);
+            FileInfo gameFile = ResolveGameFile(gameArg);
+            if (gameFile == null)
                 return;
-            }
 
             if (string.IsNullOrEmpty(profile))
                 profile = Path.GetFileNameWithoutExtension(gameFile.Name);
 
-            if (!ProfilesLibrary.Initialize(profile))
-            {
-                Console.WriteLine("Could not initialize profile: " + profile);
-                return;
-            }
-
             Directory.CreateDirectory(outDir);
-
-            FileSystem fs = new FileSystem(gameFile.DirectoryName);
-            foreach (FileSystemSource source in ProfilesLibrary.Sources)
-                fs.AddSource(source.Path, source.SubDirs);
-            fs.Initialize(KeyManager.Instance.GetKey("Key1"));
-
-            ResourceManager rm = new ResourceManager(fs);
-            rm.SetLogger(logger);
-            rm.Initialize();
-
-            AssetManager am = new AssetManager(fs, rm);
-            am.SetLogger(logger);
-            am.Initialize(false);
+            AssetManager am = LoadAssetManager(gameFile, profile);
 
             int exported = 0;
             if (types.Contains("ebx"))
@@ -420,6 +550,51 @@ namespace FrostyCmd
             }
 
             Console.WriteLine("Exported {0} files to {1}", exported, outDir);
+        }
+
+        private static FileInfo ResolveGameFile(string gameArg)
+        {
+            FileInfo gameFile;
+            if (Directory.Exists(gameArg))
+            {
+                string exe = Path.Combine(gameArg, "CollegeFB27.exe");
+                if (!File.Exists(exe))
+                    exe = Directory.EnumerateFiles(gameArg, "*.exe").FirstOrDefault();
+                gameFile = new FileInfo(exe ?? gameArg);
+            }
+            else
+            {
+                gameFile = new FileInfo(gameArg);
+            }
+
+            if (!gameFile.Exists)
+            {
+                Console.WriteLine("Could not find game executable: " + gameArg);
+                return null;
+            }
+            return gameFile;
+        }
+
+        private static AssetManager LoadAssetManager(FileInfo gameFile, string profile)
+        {
+            if (!ProfilesLibrary.Initialize(profile))
+                throw new InvalidOperationException("Could not initialize profile: " + profile);
+
+            TypeLibrary.Initialize();
+
+            FileSystem fs = new FileSystem(gameFile.DirectoryName);
+            foreach (FileSystemSource source in ProfilesLibrary.Sources)
+                fs.AddSource(source.Path, source.SubDirs);
+            fs.Initialize(KeyManager.Instance.GetKey("Key1"));
+
+            ResourceManager rm = new ResourceManager(fs);
+            rm.SetLogger(logger);
+            rm.Initialize();
+
+            AssetManager assetManager = new AssetManager(fs, rm);
+            assetManager.SetLogger(logger);
+            assetManager.Initialize(false);
+            return assetManager;
         }
 
         private static bool MatchesFilter(AssetEntry entry, string filter)

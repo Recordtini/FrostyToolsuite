@@ -653,6 +653,10 @@ namespace FrostySdk.Managers
                     WriteToCache();
                 }
             }
+            else if (usesRawEbxIndex)
+            {
+                ClassifyRiffEbxAssets();
+            }
 
             TimeSpan ElapsedTime = DateTime.Now - StartTime;
             WriteToLog("Loading Complete", ElapsedTime.ToString());
@@ -757,6 +761,9 @@ namespace FrostySdk.Managers
 
         private void ClassifyRiffEbxAssets()
         {
+            foreach (ResAssetEntry resource in resList.Values)
+                resource.ResType = NormalizeCfbResourceType(resource.ResType);
+
             foreach (EbxAssetEntry entry in ebxList.Values)
             {
                 if (!string.IsNullOrEmpty(entry.Type)
@@ -776,10 +783,25 @@ namespace FrostySdk.Managers
                         entry.Type = "MeshAsset";
                         continue;
                     }
+                    if (resource.ResType == (uint)ResourceType.NewWaveResource)
+                    {
+                        entry.Type = "NewWaveAsset";
+                        continue;
+                    }
                 }
 
                 entry.Type = "RiffEbxAsset";
             }
+        }
+
+        private static uint NormalizeCfbResourceType(uint resourceType)
+        {
+            uint reversed = ((resourceType & 0x000000FFu) << 24)
+                | ((resourceType & 0x0000FF00u) << 8)
+                | ((resourceType & 0x00FF0000u) >> 8)
+                | ((resourceType & 0xFF000000u) >> 24);
+
+            return Enum.IsDefined(typeof(ResourceType), reversed) ? reversed : resourceType;
         }
 
         public bool ResolveEbxMetadata(EbxAssetEntry entry)
@@ -1783,6 +1805,9 @@ namespace FrostySdk.Managers
 
         private Stream GetAsset(AssetEntry entry)
         {
+            if (entry == null)
+                return null;
+
             // return modified data
             if (entry.ModifiedEntry != null && entry.ModifiedEntry.Data != null)
                 return rm.GetResourceData(entry.ModifiedEntry.Data);
