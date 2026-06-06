@@ -602,6 +602,8 @@ namespace FrostySdk.Managers
         {
             DateTime StartTime = DateTime.Now;
             List<EbxAssetEntry> prePatchCache = new List<EbxAssetEntry>();
+            bool usesRawEbxIndex = ProfilesLibrary.ProfileName == "CollegeFB27"
+                || ProfilesLibrary.ProfileName == "CollegeFB27_Trial";
 
             bool loadedFromCache = false;
             try
@@ -642,8 +644,11 @@ namespace FrostySdk.Managers
 
                 GC.Collect();
 
+                if (usesRawEbxIndex)
+                    MarkEbxAsRaw();
+
                 // if there is not additional startup or the ebxGuidList has items, write the cache
-                if (!additionalStartup || ebxGuidList.Count > 0)
+                if (!additionalStartup || ebxGuidList.Count > 0 || usesRawEbxIndex)
                 {
                     WriteToCache();
                 }
@@ -655,7 +660,10 @@ namespace FrostySdk.Managers
             if (additionalStartup)
             {
                 // index those ebx
-                DoEbxIndexing();
+                if (usesRawEbxIndex)
+                    WriteToLog("Skipping eager EBX type indexing for College Football 27; raw EBX export remains available.");
+                else
+                    DoEbxIndexing();
 
                 // determine if bundle is a blueprint bundle or a shared bundle
                 foreach (BundleEntry bundle in bundles)
@@ -744,6 +752,15 @@ namespace FrostySdk.Managers
             }
         }
 
+        private void MarkEbxAsRaw()
+        {
+            foreach (EbxAssetEntry entry in ebxList.Values)
+            {
+                if (string.IsNullOrEmpty(entry.Type))
+                    entry.Type = "UnsupportedEbx";
+            }
+        }
+
         private void ResetCachedAssets()
         {
             superBundles.Clear();
@@ -767,6 +784,7 @@ namespace FrostySdk.Managers
             List<EbxAssetEntry> ebxToRemove = new List<EbxAssetEntry>();
             int assetCount = ebxList.Count;
             int count = 0;
+            int lastProgress = -1;
 
             DateTime startTime = DateTime.Now;
             foreach (EbxAssetEntry entry in ebxList.Values)
@@ -869,8 +887,13 @@ namespace FrostySdk.Managers
                 }
 
                 count++;
-                WriteToLog("Initial load - Indexing data ({0}%)", (int)((count / (double)assetCount) * 100.0));
-                WriteToLog("progress:{0}", ((count / (double)assetCount) * 100.0d));
+                int progress = (int)((count / (double)assetCount) * 100.0);
+                if (progress != lastProgress)
+                {
+                    lastProgress = progress;
+                    WriteToLog("Initial load - Indexing data ({0}%)", progress);
+                    WriteToLog("progress:{0}", progress);
+                }
             }
 
             foreach (EbxAssetEntry entry in ebxToRemove)
@@ -2099,7 +2122,13 @@ namespace FrostySdk.Managers
             WriteToLog("Loading Data (" + fs.CacheName + ".cache)");
             bool bIsPatched = false;
 
-            using (NativeReader reader = new NativeReader(new FileStream(fs.CacheName + ".cache", FileMode.Open, FileAccess.Read)))
+            using (NativeReader reader = new NativeReader(new FileStream(
+                fs.CacheName + ".cache",
+                FileMode.Open,
+                FileAccess.Read,
+                FileShare.Read,
+                1024 * 1024,
+                FileOptions.SequentialScan)))
             {
                 ulong magic = reader.ReadULong();
                 if (magic != CacheMagic)
@@ -2129,6 +2158,7 @@ namespace FrostySdk.Managers
                 }
                 else
                 {
+                    superBundles.Capacity = Math.Max(superBundles.Capacity, count);
                     for (int i = 0; i < count; i++)
                     {
                         SuperBundleEntry sbentry = new SuperBundleEntry {Name = reader.ReadNullTerminatedString()};
@@ -2139,6 +2169,7 @@ namespace FrostySdk.Managers
                 count = reader.ReadInt();
                 if (count == 0)
                     return false;
+                bundles.Capacity = Math.Max(bundles.Capacity, count);
 
                 // bundles
                 for (int i = 0; i < count; i++)
@@ -2159,6 +2190,15 @@ namespace FrostySdk.Managers
 
                 // ebx
                 count = reader.ReadInt();
+                if (!bIsPatched)
+                {
+                    ebxList = new Dictionary<string, EbxAssetEntry>(count, StringComparer.OrdinalIgnoreCase);
+                    bool usesRawEbxIndex = ProfilesLibrary.ProfileName == "CollegeFB27"
+                        || ProfilesLibrary.ProfileName == "CollegeFB27_Trial";
+                    ebxGuidList = usesRawEbxIndex
+                        ? new Dictionary<Guid, EbxAssetEntry>()
+                        : new Dictionary<Guid, EbxAssetEntry>(count);
+                }
                 for (int i = 0; i < count; i++)
                 {
                     EbxAssetEntry entry = new EbxAssetEntry
@@ -2217,6 +2257,11 @@ namespace FrostySdk.Managers
 
                 // res
                 count = reader.ReadInt();
+                if (!bIsPatched)
+                {
+                    resList = new Dictionary<string, ResAssetEntry>(count);
+                    resRidList = new Dictionary<ulong, ResAssetEntry>(count);
+                }
                 for (int i = 0; i < count; i++)
                 {
                     ResAssetEntry entry = new ResAssetEntry
@@ -2263,6 +2308,8 @@ namespace FrostySdk.Managers
 
                 // chunk
                 count = reader.ReadInt();
+                if (!bIsPatched)
+                    chunkList = new Dictionary<Guid, ChunkAssetEntry>(count);
                 for (int i = 0; i < count; i++)
                 {
                     ChunkAssetEntry entry = new ChunkAssetEntry
@@ -2329,7 +2376,13 @@ namespace FrostySdk.Managers
             if (!Directory.Exists(fi.DirectoryName))
                 Directory.CreateDirectory(fi.DirectoryName);
 
-            using (NativeWriter writer = new NativeWriter(new FileStream(fi.FullName, FileMode.Create)))
+            using (NativeWriter writer = new NativeWriter(new FileStream(
+                fi.FullName,
+                FileMode.Create,
+                FileAccess.Write,
+                FileShare.None,
+                1024 * 1024,
+                FileOptions.SequentialScan)))
             {
                 writer.Write(CacheMagic);
                 writer.Write(CacheVersion);
@@ -2348,7 +2401,7 @@ namespace FrostySdk.Managers
                     for (int i = 0; i < superBundles.Count; i++)
                     {
                         writer.WriteNullTerminatedString(superBundles[i].Name);
-                        WriteToLog(string.Format("progress:{0}", (double)i / (double)superBundles.Count * 100.0));
+                        WriteCacheProgress(i, superBundles.Count);
                     }
                 }
 
@@ -2360,16 +2413,15 @@ namespace FrostySdk.Managers
                     writer.WriteNullTerminatedString(bundles[i].Name);
                     writer.Write(bundles[i].SuperBundleId);
 
-                    WriteToLog(string.Format("progress:{0}", (double)i / (double)bundles.Count * 100.0));
+                    WriteCacheProgress(i, bundles.Count);
                 }
 
                 WriteToLog("Writing to cache (EBX)");
 
-                writer.Write(ebxList.Values.Count);
-                for (int i = 0; i < ebxList.Count; i++)
+                writer.Write(ebxList.Count);
+                int ebxIndex = 0;
+                foreach (EbxAssetEntry ebx in ebxList.Values)
                 {
-                    EbxAssetEntry ebx = ebxList.Values.ElementAt(i);
-
                     writer.WriteNullTerminatedString(ebx.Name);
                     writer.Write(ebx.Sha1);
                     writer.Write(ebx.Size);
@@ -2399,16 +2451,15 @@ namespace FrostySdk.Managers
                         writer.Write(dependencyGuid);
                     }
 
-                    WriteToLog(string.Format("progress:{0}", (double)i / (double)ebxList.Count * 100.0));
+                    WriteCacheProgress(ebxIndex++, ebxList.Count);
                 }
 
                 WriteToLog("Writing to cache (RES)");
 
-                writer.Write(resList.Values.Count);
-                for (int i = 0; i < resList.Count; i++)
+                writer.Write(resList.Count);
+                int resIndex = 0;
+                foreach (ResAssetEntry res in resList.Values)
                 {
-                    ResAssetEntry res = resList.Values.ElementAt(i);
-
                     writer.WriteNullTerminatedString(res.Name);
                     writer.Write(res.Sha1);
                     writer.Write(res.Size);
@@ -2435,16 +2486,15 @@ namespace FrostySdk.Managers
                         writer.Write(baseBundleId);
                     }
 
-                    WriteToLog(string.Format("progress:{0}", (double)i / (double)resList.Count * 100.0));
+                    WriteCacheProgress(resIndex++, resList.Count);
                 }
 
                 WriteToLog("Writing to cache (CHUNK)");
 
                 writer.Write(chunkList.Count);
-                for (int i = 0; i < chunkList.Count; i++)
+                int chunkIndex = 0;
+                foreach (ChunkAssetEntry chunk in chunkList.Values)
                 {
-                    ChunkAssetEntry chunk = chunkList.Values.ElementAt(i);
-
                     writer.Write(chunk.Id);
                     writer.Write(chunk.Sha1);
                     writer.Write(chunk.Size);
@@ -2473,12 +2523,22 @@ namespace FrostySdk.Managers
                         writer.Write(baseBundleId);
                     }
 
-                    WriteToLog(string.Format("progress:{0}", (double)i / (double)chunkList.Count * 100.0));
+                    WriteCacheProgress(chunkIndex++, chunkList.Count);
                 }
             }
 
             File.Delete(cachePath);
             File.Move(fi.FullName, cachePath);
+        }
+
+        private void WriteCacheProgress(int index, int count)
+        {
+            if (count == 0)
+                return;
+
+            int interval = Math.Max(1, count / 100);
+            if (index == 0 || index + 1 == count || index % interval == 0)
+                WriteToLog("progress:{0}", (index + 1) / (double)count * 100.0);
         }
 
         private void WriteToLog(string text, params object[] vars) => logger?.Log(text, vars);
