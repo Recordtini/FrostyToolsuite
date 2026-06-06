@@ -788,33 +788,51 @@ namespace FrostySdk.Managers
 
                 if (stream != null)
                 {
-                    using (EbxReader reader = EbxReader.CreateReader(stream, fs, patched))
+                    try
                     {
-                        entry.Type = reader.RootType;
-                        entry.Guid = reader.FileGuid;
-
-                        // now grab the actual asset name
-                        reader.Position = reader.stringsOffset;
-                        string name = reader.ReadNullTerminatedString();
-                        int newNameHash = Fnv1.HashString(name.ToLower());
-
-                        // only if the lower case one matches
-                        if (newNameHash == nameHash)
-                            entry.Name = name;
-
-                        foreach (EbxImportReference import in reader.imports)
+                        using (EbxReader reader = EbxReader.CreateReader(stream, fs, patched))
                         {
-                            if (!entry.ContainsDependency(import.FileGuid))
-                                entry.DependentAssets.Add(import.FileGuid);
+                            string rootType = reader.RootType;
+                            if (string.IsNullOrEmpty(rootType))
+                            {
+                                entry.Type = "UnsupportedEbx";
+                                WriteToLog("Unsupported EBX header: {0}", entry.Name);
+                            }
+                            else
+                            {
+                                entry.Type = rootType;
+                                entry.Guid = reader.FileGuid;
 
-                        }
+                                // now grab the actual asset name
+                                reader.Position = reader.stringsOffset;
+                                string name = reader.ReadNullTerminatedString();
+                                int newNameHash = Fnv1.HashString(name.ToLower());
 
-                        if (ebxGuidList.ContainsKey(entry.Guid))
-                        {
-                            //logger.Log("Existing asset found with same guid '{0}'", entry.Guid);
-                            continue;
+                                // only if the lower case one matches
+                                if (newNameHash == nameHash)
+                                    entry.Name = name;
+
+                                foreach (EbxImportReference import in reader.imports)
+                                {
+                                    if (!entry.ContainsDependency(import.FileGuid))
+                                        entry.DependentAssets.Add(import.FileGuid);
+                                }
+
+                                if (ebxGuidList.ContainsKey(entry.Guid))
+                                {
+                                    //logger.Log("Existing asset found with same guid '{0}'", entry.Guid);
+                                    continue;
+                                }
+
+                                ebxGuidList.Add(entry.Guid, entry);
+                            }
                         }
-                        ebxGuidList.Add(entry.Guid, entry);
+                    }
+                    catch (Exception ex) when (!(ex is OutOfMemoryException))
+                    {
+                        entry.Type = "UnsupportedEbx";
+                        entry.Guid = Guid.Empty;
+                        WriteToLog("Unable to index EBX '{0}': {1}", entry.Name, ex.Message);
                     }
                 }
                 else
@@ -1556,6 +1574,9 @@ namespace FrostySdk.Managers
 
         public T GetEbxAs<T>(EbxAssetEntry entry) where T : EbxAsset, new()
         {
+            if (entry == null || entry.Type == "UnsupportedEbx")
+                return null;
+
             // return modified data as a data object
             ModifiedResource modifiedResource = null;
             if (entry.ModifiedEntry?.DataObject != null)
@@ -1583,6 +1604,9 @@ namespace FrostySdk.Managers
 
         public EbxAsset GetEbx(EbxAssetEntry entry, bool getUnmodifiedData = false)
         {
+            if (entry == null || entry.Type == "UnsupportedEbx")
+                return null;
+
             // return modified data as a data object
             if ((entry.ModifiedEntry?.DataObject as EbxAsset) != null && !getUnmodifiedData)
                 return entry.ModifiedEntry.DataObject as EbxAsset;
